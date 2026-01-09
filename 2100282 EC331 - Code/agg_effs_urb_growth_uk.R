@@ -1,6 +1,8 @@
 #_______________________________________________________________________________
 # initialisation ####
 
+# clean all
+rm(list = ls())
 
 packages = c("readr", "tidyverse", "httr", "jsonlite", "readxl", "ggrepel", "stargazer")
 
@@ -16,8 +18,11 @@ install_if_missing <- function(pkg) {
 }
 invisible(lapply(packages, install_if_missing))
 
-# clean all
-rm(list = ls())
+#_______________________________________________________________________________
+# SKIP DATA CONSTRUCTION? ####
+# Set to TRUE if you've already run the data cleaning pipeline and want to skip to counterfactuals
+# Set to FALSE to run the full pipeline from scratch
+SKIP_DATA_CONSTRUCTION <- FALSE
 
 ## US parameter values ####
 
@@ -41,1036 +46,1055 @@ city_pop_threshold = 20000
 geographic_constraint_potential_list = c("mean_z_i","median_z_i","min_z_i")
 geographic_constraint = "mean_z_i"
 
-#_______________________________________________________________________________
-# data cleaning ####
-#_______________________________________________________________________________
-## Importing data ####
-
-# import 2022 land use data (using 2021 LSOA boundaries)
-# https://www.gov.uk/government/statistics/land-use-in-england-2022
-lsoa_land_use_2022_raw = read_csv("Data/lsoa_land_use_2022.csv")
-
-# import LSOA pop data for 2001, 2011, 2021
-# https://www.nomisweb.co.uk/query/construct/summary.asp?mode=construct&version=0&dataset=1634
-# https://www.nomisweb.co.uk/query/construct/summary.asp?mode=construct&version=0&dataset=144
-# https://www.nomisweb.co.uk/query/construct/summary.asp?mode=construct&version=0&dataset=2021
-for (censusyr in c(2001,2011,2021)) {
-  assign(paste0("lsoa_pop_",censusyr,"_raw"), read_csv(paste0("Data/lsoa_pop_",censusyr,".csv")))
-}
-rm(censusyr)
-
-# import inter-year LSOA lookups
-# https://www.data.gov.uk/dataset/4048a518-3eaf-457a-905c-9e04f4fffca8/lsoa-2001-to-lsoa-2011-to-lad-december-2011-best-fit-lookup-in-ew1
-lsoa_lookup_2001_to_2011_raw = read_csv("Data/LSOA_(2001)_to_LSOA_(2011)_to_LAD_(2011)_Lookup_in_England_and_Wales.csv")
-# https://geoportal.statistics.gov.uk/datasets/ons::lsoa-2011-to-lsoa-2021-to-local-authority-district-2022-best-fit-lookup-for-ew-v2/about
-lsoa_lookup_2011_to_2021_raw = read_csv("Data/LSOA_(2011)_to_LSOA_(2021)_to_LAD_(2022)_Best_Fit_Lookup_for_EW_(V2).csv")
-
-# import 2021 LSOA to BUA lookup
-# https://geoportal.statistics.gov.uk/datasets/ons::lsoa-2021-to-bua-to-lad-to-region-december-2022-best-fit-lookup-in-ew-v2/about
-lsoa_bua_lookup_2021_raw = read_csv("Data/LSOA_(2021)_to_Built_Up_Area_to_Local_Authority_District_to_Region_(December_2022)_Lookup_in_England_and_Wales_v2.csv")
-
-# LAD permitting data
-# https://assets.publishing.service.gov.uk/media/67d2ac07886e7770c211e042/PS2_data_-_open_data_table__202412_.csv/preview
-perm_rates_raw = read_csv("Data/PS2_data_-_open_data_table__202409_.csv",
-                          skip = 2) %>%  # Skip first 2 rows so row 3 becomes headers
-  select(2:4,34,112) %>%
-  slice((33128):n())  # Filter rows from 33128 (start of 2001 data)
-
-#_______________________________________________________________________________
-## 2001-2011 merging ####
-
-# for 2001 LSOAs, find equivalent 2011 LSOAs
-lsoa_pop_2001_to_2011 = lsoa_pop_2001_raw %>%
-  full_join(lsoa_lookup_2001_to_2011_raw, 
-            by = c("lsoa_2001_code" = "LSOA01CD")) %>%
-  select(2:7)
-
-rm(lsoa_pop_2001_raw,
-   lsoa_lookup_2001_to_2011_raw)
-
-# check if there are any missing values in the 2001-2011 linked dataset
-lsoa_pop_2001_to_2011 %>%
-  filter(if_any(everything(), is.na))
-
-# https://geoportal.statistics.gov.uk/datasets/ons::lsoa-2001-to-lsoa-2011-to-lad-december-2011-best-fit-lookup-in-ew/about
-# U means unchanged, so no problems there
-# M means merged, so for any 2001 LSOAs that merge into 2011 LSOAs, add their 2001 pops together
-# X means irregular relationship. For any 2001 LSOAs 
-
-# Create a subset of rows where LSOA11CD appears more than once
-# AND at least one of those rows has "X" in CHGIND
-lsoa_pop_2001_to_2011 %>%
-  # Group by LSOA11CD to check for duplicates
-  group_by(LSOA11CD) %>%
-  # Filter groups that have duplicates AND at least one "X"
-  filter(n() > 1 & any(CHGIND == "X")) %>%
-  # Remove the grouping to get back to regular dataframe
-  ungroup()
-# there are no 2011 LSOAs that are a mix of both X and not X (i.e. they are only changed irregularly).
-
-# for U, M, X, we merge any 2001 LSOA pops that got merged under the 2011 LSOAs
-# if they didn't get merged, the 2001 LSOA pops correspond to the 2011 LSOAs
-lsoa_pop_2001_to_2011_merged = lsoa_pop_2001_to_2011 %>%
-  group_by(LSOA11CD) %>%
-  summarize(pop_2001_lsoa_2011_nosplit = sum(usual_resident_pop_2001),
-            LSOA11CD = first(LSOA11CD),
-            LSOA11NM = first(LSOA11NM),
-            CHGIND = first(CHGIND)
+if (SKIP_DATA_CONSTRUCTION) {
+  # load the saved intermediate dataset
+  agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints <- read_csv(
+    "Data/agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints.csv"
   )
-
-rm(lsoa_pop_2001_to_2011)
-
-# checking the LSOAs that got split (922 rows)
-lsoa_pop_2001_to_2011_merged %>%
-  filter(CHGIND == "S")
-
-# merging with 2011 LSOA pop data
-lsoa_pops_2001_and_2011_split_01_pop = lsoa_pop_2001_to_2011_merged %>%
-  left_join(lsoa_pop_2011_raw, by = c("LSOA11CD"="lsoa_code_2011")) %>%
-  # drop column that repeats 2011 LSOA names
-  select(-"lsoa_name_2011")
-
-rm(lsoa_pop_2001_to_2011_merged)
-
-# the split LSOA 2001 population values will need to be imputed 
-# do this by taking the 2011 pop values and decreasing them... 
-# ...by the relative population change of E&W between 2001-2011
-# England's pop grew by factor of 1.07396242237523 between 2001-2011
-# see "Data/eng_wales_pop_over_time.xlsx"
-# https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/datasets/populationestimatesforukenglandandwalesscotlandandnorthernireland
-lsoa_pops_2001_and_2011 = lsoa_pops_2001_and_2011_split_01_pop %>%
-  mutate(pop_2001_imputed_split = ifelse(CHGIND == "S",
-                                         usual_resident_pop_2011 / 1.07396242237523, 
-                                         pop_2001_lsoa_2011_nosplit
-  ))
-
-rm(lsoa_pops_2001_and_2011_split_01_pop)
-
-# checking rows where 2001 LSOAs were split
-lsoa_pops_2001_and_2011 %>%
-  filter(CHGIND == "S")
-
-# dropping non-imputed 2001 pop column
-lsoa_pops_2001_and_2011_imputed_only = lsoa_pops_2001_and_2011 %>%
-  select(-"pop_2001_lsoa_2011_nosplit")
-
-rm(lsoa_pops_2001_and_2011)
-
-# checking for any duplicate 2011 LSOAs (there are none - good!)
-lsoa_pops_2001_and_2011_imputed_only %>%
-  group_by(LSOA11CD) %>%
-  filter(n() > 1) %>%
-  ungroup()
-
-# the 2011 LSOA raw pop file has 4 more observations than the merged file
-# and the original 2001-2011 LSOA lookup file
-# finding those missing observations
-diff_11_raw_pop_and_merged_df = lsoa_pop_2011_raw %>%
-  anti_join(lsoa_pops_2001_and_2011_imputed_only,
-            by = c("lsoa_code_2011" = "LSOA11CD")) %>%
-  print()
-
-rm(lsoa_pop_2011_raw)
-
-# create a dataframe of these missing observations to add manually to the merged file
-diff_11_raw_pop_and_merged_df_for_joining = data.frame(
-  LSOA11CD = diff_11_raw_pop_and_merged_df$lsoa_code_2011,
-  LSOA11NM = diff_11_raw_pop_and_merged_df$lsoa_name_2011,
-  # create new change indicator "N" for "newly joined" for all of these entries
-  CHGIND = rep("N", times = nrow(diff_11_raw_pop_and_merged_df)),
-  usual_resident_pop_2011 = diff_11_raw_pop_and_merged_df$usual_resident_pop_2011,
-  # and imputing 2001 pop in same way as above (using E&W pop growth rate)
-  pop_2001_imputed_split = diff_11_raw_pop_and_merged_df$usual_resident_pop_2011 / 1.07278362492818
-)
-
-# adding missing observations to merged file
-lsoa_pops_2001_and_2011_imputed_only_plus_miss = lsoa_pops_2001_and_2011_imputed_only %>%
-  bind_rows(diff_11_raw_pop_and_merged_df_for_joining)
-
-rm(lsoa_pops_2001_and_2011_imputed_only,
-   diff_11_raw_pop_and_merged_df,
-   diff_11_raw_pop_and_merged_df_for_joining)
-
-#_______________________________________________________________________________
-## 2011 to 2021 merging ####
-
-# 2011 to 2021 LSOA lookup
-# keeping only relevant cols
-# 2011 LSOA, 2021 LSOA, 2022 LAD
-lsoa_lookup_2011_to_2021_narrow = lsoa_lookup_2011_to_2021_raw %>%
-  select(2:7)
-
-rm(lsoa_lookup_2011_to_2021_raw)
-
-# check for rows where multiple 2011 LSOAs are merged into 2021 LSOAs
-lsoa_lookup_2011_to_2021_narrow %>%
-  group_by(LSOA21CD) %>%
-  filter(n() > 1)
-
-# joining 2001&2011 pop data in 2011 LSOAs to 2011-2021 LSOA lookup
-lsoa_pop_01_11_merged_w_21_lsoa = lsoa_pops_2001_and_2011_imputed_only_plus_miss %>%
-  full_join(lsoa_lookup_2011_to_2021_narrow,
-            by = "LSOA11CD")
-
-rm(lsoa_pops_2001_and_2011_imputed_only_plus_miss,
-   lsoa_lookup_2011_to_2021_narrow)
-
-# aggregating pop values by 2021 LSOAs
-lsoa_agg_pop_01_11_merged_w_21_lsoa = lsoa_pop_01_11_merged_w_21_lsoa %>%
-  group_by(LSOA21CD) %>%
-  summarize(pop_2011_final = sum(usual_resident_pop_2011),
-            pop_2001_final = sum(pop_2001_imputed_split),
-            LSOA21NM = first(LSOA21NM),
-            LAD22CD = first(LAD22CD),
-            LAD22NM = first(LAD22NM))
-
-rm(lsoa_pop_01_11_merged_w_21_lsoa)
-
-# merging w 2021 pop data
-lsoa_pop_01_11_21_merged = lsoa_agg_pop_01_11_merged_w_21_lsoa %>%
-  full_join(lsoa_pop_2021_raw,
-            by = c("LSOA21CD" = "lsoa_21_code")) %>%
-  # dropping repeated LSOA name column
-  select(-"LSOA21NM")
-
-rm(lsoa_agg_pop_01_11_merged_w_21_lsoa,
-   lsoa_pop_2021_raw)
-
-# identifying 2021 LSOAs with missing 2011 or 2001 pop data
-lsoa_pop_01_11_21_merged %>%
-  filter(is.na(pop_2011_final) | is.na(pop_2001_final)) %>%
-  nrow()
-# there are 1044!
-
-# again, use the same impute algorithm as before
-# England's pop grew by factor of 1.14368415562741 between 2001-2021
-# and by a factor of 1.06492008640114 between 2011-2021
-# see "Data/eng_wales_pop_over_time.xlsx"
-# https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/datasets/populationestimatesforukenglandandwalesscotlandandnorthernireland
-lsoa_pop_01_11_21_miss_imputed = lsoa_pop_01_11_21_merged %>%
-  mutate(pop_2011_final = ifelse(is.na(pop_2011_final),
-                                 total_lsoa_pop_21 / 1.06492008640114,
-                                 pop_2011_final
+  
+  # also need these for the counterfactual
+  tot_01_pop <- 49449700
+  tot_21_pop <- 56554900
+  urb_01_pop <- sum(agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints$bua_01_pop)
+  urb_21_pop <- sum(agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints$bua_21_pop)
+  rur_01_pop <- tot_01_pop - urb_01_pop
+  rur_21_pop <- tot_21_pop - urb_21_pop
+  
+  message("Data loaded. Skipping to counterfactual section.")
+  
+} else {
+  message("Running full data construction pipeline...")
+  #_______________________________________________________________________________
+  # data cleaning ####
+  
+  #_______________________________________________________________________________
+  ## Importing data ####
+  
+  # import 2022 land use data (using 2021 LSOA boundaries)
+  # https://www.gov.uk/government/statistics/land-use-in-england-2022
+  lsoa_land_use_2022_raw = read_csv("Data/lsoa_land_use_2022.csv")
+  
+  # import LSOA pop data for 2001, 2011, 2021
+  # https://www.nomisweb.co.uk/query/construct/summary.asp?mode=construct&version=0&dataset=1634
+  # https://www.nomisweb.co.uk/query/construct/summary.asp?mode=construct&version=0&dataset=144
+  # https://www.nomisweb.co.uk/query/construct/summary.asp?mode=construct&version=0&dataset=2021
+  for (censusyr in c(2001,2011,2021)) {
+    assign(paste0("lsoa_pop_",censusyr,"_raw"), read_csv(paste0("Data/lsoa_pop_",censusyr,".csv")))
+  }
+  rm(censusyr)
+  
+  # import inter-year LSOA lookups
+  # https://www.data.gov.uk/dataset/4048a518-3eaf-457a-905c-9e04f4fffca8/lsoa-2001-to-lsoa-2011-to-lad-december-2011-best-fit-lookup-in-ew1
+  lsoa_lookup_2001_to_2011_raw = read_csv("Data/LSOA_(2001)_to_LSOA_(2011)_to_LAD_(2011)_Lookup_in_England_and_Wales.csv")
+  # https://geoportal.statistics.gov.uk/datasets/ons::lsoa-2011-to-lsoa-2021-to-local-authority-district-2022-best-fit-lookup-for-ew-v2/about
+  lsoa_lookup_2011_to_2021_raw = read_csv("Data/LSOA_(2011)_to_LSOA_(2021)_to_LAD_(2022)_Best_Fit_Lookup_for_EW_(V2).csv")
+  
+  # import 2021 LSOA to BUA lookup
+  # https://geoportal.statistics.gov.uk/datasets/ons::lsoa-2021-to-bua-to-lad-to-region-december-2022-best-fit-lookup-in-ew-v2/about
+  lsoa_bua_lookup_2021_raw = read_csv("Data/LSOA_(2021)_to_Built_Up_Area_to_Local_Authority_District_to_Region_(December_2022)_Lookup_in_England_and_Wales_v2.csv")
+  
+  # LAD permitting data
+  # https://assets.publishing.service.gov.uk/media/67d2ac07886e7770c211e042/PS2_data_-_open_data_table__202412_.csv/preview
+  perm_rates_raw = read_csv("Data/PS2_data_-_open_data_table__202409_.csv",
+                            skip = 2) %>%  # Skip first 2 rows so row 3 becomes headers
+    select(2:4,34,112) %>%
+    slice((33128):n())  # Filter rows from 33128 (start of 2001 data)
+  
+  #_______________________________________________________________________________
+  ## 2001-2011 merging ####
+  
+  # for 2001 LSOAs, find equivalent 2011 LSOAs
+  lsoa_pop_2001_to_2011 = lsoa_pop_2001_raw %>%
+    full_join(lsoa_lookup_2001_to_2011_raw, 
+              by = c("lsoa_2001_code" = "LSOA01CD")) %>%
+    select(2:7)
+  
+  rm(lsoa_pop_2001_raw,
+     lsoa_lookup_2001_to_2011_raw)
+  
+  # check if there are any missing values in the 2001-2011 linked dataset
+  lsoa_pop_2001_to_2011 %>%
+    filter(if_any(everything(), is.na))
+  
+  # https://geoportal.statistics.gov.uk/datasets/ons::lsoa-2001-to-lsoa-2011-to-lad-december-2011-best-fit-lookup-in-ew/about
+  # U means unchanged, so no problems there
+  # M means merged, so for any 2001 LSOAs that merge into 2011 LSOAs, add their 2001 pops together
+  # X means irregular relationship. For any 2001 LSOAs 
+  
+  # Create a subset of rows where LSOA11CD appears more than once
+  # AND at least one of those rows has "X" in CHGIND
+  lsoa_pop_2001_to_2011 %>%
+    # Group by LSOA11CD to check for duplicates
+    group_by(LSOA11CD) %>%
+    # Filter groups that have duplicates AND at least one "X"
+    filter(n() > 1 & any(CHGIND == "X")) %>%
+    # Remove the grouping to get back to regular dataframe
+    ungroup()
+  # there are no 2011 LSOAs that are a mix of both X and not X (i.e. they are only changed irregularly).
+  
+  # for U, M, X, we merge any 2001 LSOA pops that got merged under the 2011 LSOAs
+  # if they didn't get merged, the 2001 LSOA pops correspond to the 2011 LSOAs
+  lsoa_pop_2001_to_2011_merged = lsoa_pop_2001_to_2011 %>%
+    group_by(LSOA11CD) %>%
+    summarize(pop_2001_lsoa_2011_nosplit = sum(usual_resident_pop_2001),
+              LSOA11CD = first(LSOA11CD),
+              LSOA11NM = first(LSOA11NM),
+              CHGIND = first(CHGIND)
+    )
+  
+  rm(lsoa_pop_2001_to_2011)
+  
+  # checking the LSOAs that got split (922 rows)
+  lsoa_pop_2001_to_2011_merged %>%
+    filter(CHGIND == "S")
+  
+  # merging with 2011 LSOA pop data
+  lsoa_pops_2001_and_2011_split_01_pop = lsoa_pop_2001_to_2011_merged %>%
+    left_join(lsoa_pop_2011_raw, by = c("LSOA11CD"="lsoa_code_2011")) %>%
+    # drop column that repeats 2011 LSOA names
+    select(-"lsoa_name_2011")
+  
+  rm(lsoa_pop_2001_to_2011_merged)
+  
+  # the split LSOA 2001 population values will need to be imputed 
+  # do this by taking the 2011 pop values and decreasing them... 
+  # ...by the relative population change of E&W between 2001-2011
+  # England's pop grew by factor of 1.07396242237523 between 2001-2011
+  # see "Data/eng_wales_pop_over_time.xlsx"
+  # https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/datasets/populationestimatesforukenglandandwalesscotlandandnorthernireland
+  lsoa_pops_2001_and_2011 = lsoa_pops_2001_and_2011_split_01_pop %>%
+    mutate(pop_2001_imputed_split = ifelse(CHGIND == "S",
+                                           usual_resident_pop_2011 / 1.07396242237523, 
+                                           pop_2001_lsoa_2011_nosplit
+    ))
+  
+  rm(lsoa_pops_2001_and_2011_split_01_pop)
+  
+  # checking rows where 2001 LSOAs were split
+  lsoa_pops_2001_and_2011 %>%
+    filter(CHGIND == "S")
+  
+  # dropping non-imputed 2001 pop column
+  lsoa_pops_2001_and_2011_imputed_only = lsoa_pops_2001_and_2011 %>%
+    select(-"pop_2001_lsoa_2011_nosplit")
+  
+  rm(lsoa_pops_2001_and_2011)
+  
+  # checking for any duplicate 2011 LSOAs (there are none - good!)
+  lsoa_pops_2001_and_2011_imputed_only %>%
+    group_by(LSOA11CD) %>%
+    filter(n() > 1) %>%
+    ungroup()
+  
+  # the 2011 LSOA raw pop file has 4 more observations than the merged file
+  # and the original 2001-2011 LSOA lookup file
+  # finding those missing observations
+  diff_11_raw_pop_and_merged_df = lsoa_pop_2011_raw %>%
+    anti_join(lsoa_pops_2001_and_2011_imputed_only,
+              by = c("lsoa_code_2011" = "LSOA11CD")) %>%
+    print()
+  
+  rm(lsoa_pop_2011_raw)
+  
+  # create a dataframe of these missing observations to add manually to the merged file
+  diff_11_raw_pop_and_merged_df_for_joining = data.frame(
+    LSOA11CD = diff_11_raw_pop_and_merged_df$lsoa_code_2011,
+    LSOA11NM = diff_11_raw_pop_and_merged_df$lsoa_name_2011,
+    # create new change indicator "N" for "newly joined" for all of these entries
+    CHGIND = rep("N", times = nrow(diff_11_raw_pop_and_merged_df)),
+    usual_resident_pop_2011 = diff_11_raw_pop_and_merged_df$usual_resident_pop_2011,
+    # and imputing 2001 pop in same way as above (using E&W pop growth rate)
+    pop_2001_imputed_split = diff_11_raw_pop_and_merged_df$usual_resident_pop_2011 / 1.07278362492818
   )
-  ) %>%
-  mutate(pop_2001_final = ifelse(is.na(pop_2001_final),
-                                 total_lsoa_pop_21 / 1.14368415562741,
-                                 pop_2001_final
-  )
-  )
-
-rm(lsoa_pop_01_11_21_merged)
-
-# the land use statistics are only for English 2021 LSOAs
-# checking we don't have any LSOAs not coded for England or Wales
-lsoa_pop_01_11_21_miss_imputed %>%
-  filter(!startsWith(LSOA21CD, "E") & !startsWith(LSOA21CD, "W"))
-# we don't
-
-# checking that the number of English LSOAs in the population dataset matches the number in the land use dataset
-lsoa_pop_01_11_21_miss_imputed %>%
-  filter(startsWith(LSOA21CD, "E")) %>%
-  nrow()
-# it does - 33755
-
-# only keeping English LSOAs
-lsoa_eng_pop_01_11_21_miss_imputed = lsoa_pop_01_11_21_miss_imputed %>%
-  filter(startsWith(LSOA21CD, "E"))
-
-rm(lsoa_pop_01_11_21_miss_imputed)
-
-#_______________________________________________________________________________
-## importing land use data ####
-
-# joining with English LSOA land use data
-lsoa_eng_pop_01_11_21_imputed_w_land_use = lsoa_eng_pop_01_11_21_miss_imputed %>%
-  left_join(lsoa_land_use_2022_raw,
-            by = c("LSOA21CD" = "lsoa_2021_code")) %>%
-  # dropping duplicated LSOA name col
-  select(-"lsoa_2021_name")
-
-#_______________________________________________________________________________
-## matching missing LAD codes ####
-# checking how many distinct LAD codes there are in this LSOA dataset
-lads_in_lsoa_data = lsoa_eng_pop_01_11_21_imputed_w_land_use %>%
-  distinct(LAD22CD, LAD22NM)
-# 310 - one of these is NA
-
-# splitting by 3-character geocode prefix
-# E06, E07, E08, E09 (plus NA)
-lad_prefix_counts = lads_in_lsoa_data %>%
-  mutate(prefix = str_sub(LAD22CD, 1, 3)) %>%
-  group_by(prefix) %>%
-  summarise(count = n_distinct(LAD22CD)) %>%
-  arrange(prefix)
-print(lad_prefix_counts)
-# 1 E06       59
-# 2 E07      181
-# 3 E08       36
-# 4 E09       33
-# 5 NA         1
-
-# investigating the NA-valued LAD
-lsoas_w_missing_lad = lsoa_eng_pop_01_11_21_imputed_w_land_use %>%
-  filter(is.na(LAD22CD))
-
-#_______________________________________________________________________________
-## ## API call to match unmatched LSOAs to a LAD ####
-# 
-# # Create an empty dataframe to store results
-# lads_to_add = data.frame(
-#   LSOA21CD = character(),
-#   LAD22CD = character()
-# )
-# # call the findthatpostcode.uk API to match the LAD22CD based on the LSOA
-# # note that my wifi seems to be slow enough to not hit the rate limit...
-# # ...if you do start hitting a rate limit, just use a Sys.sleep(`#secs`) command
-# for(row in 1:nrow(lsoas_w_missing_lad)) {
-#   lsoa_code_val = lsoas_w_missing_lad[[row, 1]]
-#   url = paste0("https://findthatpostcode.uk/areas/", lsoa_code_val, ".json")
-#   response = GET(url)
-# 
-#   while (response$status_code == 429) {
-#     warning(paste("Rate limit exceeded for LSOA code: ", lsoa_code_val," - waiting 60 secs"))
-#     Sys.sleep(60)  # Wait 60 seconds before continuing
-#     response = GET(url)
-#   }
-# 
-#   json_data = fromJSON(rawToChar(response$content))
-# 
-#   lad22_val = json_data[["included"]][["attributes"]][["itl"]][1]
-#   
-#   print(paste0("LSOA: ",lsoa_code_val," has LAD code: ",lad22_val,". Row ",row," complete"))
-#   lads_to_add = lads_to_add %>%
-#     add_row(LSOA21CD = lsoa_code_val, LAD22CD = lad22_val)
-#   
-# }
-# 
-# print("Rounds complete!")
-# 
-# # saving backup of API-called dataset
-# write_csv(lads_to_add, "Data/lads_to_add_backup.csv")
-## UNCOMMENT TO HERE IF YOU WANT TO RE-RUN LAD API CALL ##
-
-## COMMENT OUT THE COMMAND BELOW IF YOU WANT TO RE-RUN LAD API CALL ##
-# loading in dataframe with results of API call
-# ie LAD codes for entries previously missing them
-lads_to_add = read_csv("Data/lads_to_add_backup.csv")
-
-# add these missing LAD codes back into the LSOA-LAD dataset
-# note the LAD names are still missing
-lsoa_eng_pop_01_11_21_nomiss_lad = lsoa_eng_pop_01_11_21_imputed_w_land_use %>%
-  left_join(lads_to_add, by = "LSOA21CD") %>%
-  mutate(LAD22CD = coalesce(LAD22CD.x, LAD22CD.y)) %>%
-  # dropping redundant code columns
-  select(-c("LAD22CD.x","LAD22CD.y"))
-
-# now, after merging, checking how many distinct LAD codes there are in this LSOA dataset
-# remember that the merged LAD22CD values don't have LAD22NM values, so we have to add these manually
-lads_in_lsoa_data = lsoa_eng_pop_01_11_21_nomiss_lad %>%
-  group_by(LAD22CD) %>%
-  mutate(LAD22NM = first(LAD22NM[!is.na(LAD22NM)])) %>%
-  distinct(LAD22CD, LAD22NM)
-# 309 values now - the NA value has been dropped
-
-# splitting by 3-character geocode prefix
-# E06, E07, E08, E09 (plus NA)
-lad_prefix_counts = lads_in_lsoa_data %>%
-  mutate(prefix = str_sub(LAD22CD, 1, 3)) %>%
-  group_by(prefix) %>%
-  summarise(count = n_distinct(LAD22CD)) %>%
-  arrange(prefix)
-print(lad_prefix_counts)
-# as before:
-# 1 E06       59
-# 2 E07      181
-# 3 E08       36
-# 4 E09       33
-
-rm(lsoa_eng_pop_01_11_21_miss_imputed,
-   lsoa_land_use_2022_raw)
-
-#_______________________________________________________________________________
-## LAD permitting rates ####
-# Extract the list of valid LAD codes from lads_in_lsoa_data
-valid_lad_codes = lads_in_lsoa_data$LAD22CD
-
-# Find LPACDs that don't meet the filter criteria
-filtered_out_lpacd = perm_rates_raw %>%
-  filter(!LPACD %in% valid_lad_codes) %>%
-  distinct(LPACD) %>%
-  pull(LPACD)
-
-# Print the filtered-out LPACD values
-print("LPACD values that were filtered out:")
-print(filtered_out_lpacd)
-
-perm_rates_data = perm_rates_raw %>%
-  # Filter to keep only LPACDs that match the LAD22CD values
-  filter(LPACD %in% valid_lad_codes) %>%
-  # Replace ".." with NA and then convert to numeric
-  mutate(major_dwellings = ifelse(`Total granted; major dwellings (all)` == "..", NA, `Total granted; major dwellings (all)`),
-         minor_dwellings = ifelse(`Total granted; minor dwellings (all)` == "..", NA, `Total granted; minor dwellings (all)`),
-         major_dwellings = as.numeric(major_dwellings),
-         minor_dwellings = as.numeric(minor_dwellings),
-         year = as.numeric(substr(Quarter, 1, 4))) %>%
-  # Group and sum by LPACD and year
-  group_by(LPACD, LPANM, year) %>%
-  summarise(total_dwellings = sum(major_dwellings, na.rm = TRUE) + sum(minor_dwellings, na.rm = TRUE),
-            .groups = 'drop') %>%
-  # up to and including 2021
-  filter(year <= 2021) %>%
-  # Pivot wider to get years as columns
-  pivot_wider(names_from = year,
-              values_from = total_dwellings,
-              names_prefix = "total_maj_and_min_dwellings_")
-
-#_______________________________________________________________________________
-## imputing missing permitting data using linear regression ####
-# Convert to long format for easier analysis of missing patterns
-perm_rates_long = perm_rates_data %>%
-  pivot_longer(cols = starts_with("total_maj_and_min_dwellings_"),
-               names_to = "year", 
-               values_to = "total_dwellings") %>%
-  mutate(year = as.numeric(gsub("total_maj_and_min_dwellings_", "", year)))
-
-# Check which LPACDs have all missing values or only 1 non-missing value
-missing_data_check = perm_rates_long %>%
-  group_by(LPACD) %>%
-  summarise(LPANM = first(LPANM),
-            n_missing = sum(is.na(total_dwellings)),
-            n_total = n(),
-            n_non_missing = n_total - n_missing,
-            .groups = 'drop') %>%
-  filter(n_missing == n_total | n_non_missing <= 1)
-
-# Create the vector of LPACDs that can't be imputed
-lpacd_noimp_miss_val = missing_data_check$LPACD
-
-# Function to perform linear imputation for a single LPACD
-impute_missing = function(data) {
-  # Check if we have any non-missing data
-  if(sum(!is.na(data$total_dwellings)) < 2) {
-    # If less than 2 non-missing points, we can't do linear regression
-    # Return original data
+  
+  # adding missing observations to merged file
+  lsoa_pops_2001_and_2011_imputed_only_plus_miss = lsoa_pops_2001_and_2011_imputed_only %>%
+    bind_rows(diff_11_raw_pop_and_merged_df_for_joining)
+  
+  rm(lsoa_pops_2001_and_2011_imputed_only,
+     diff_11_raw_pop_and_merged_df,
+     diff_11_raw_pop_and_merged_df_for_joining)
+  
+  #_______________________________________________________________________________
+  ## 2011 to 2021 merging ####
+  
+  # 2011 to 2021 LSOA lookup
+  # keeping only relevant cols
+  # 2011 LSOA, 2021 LSOA, 2022 LAD
+  lsoa_lookup_2011_to_2021_narrow = lsoa_lookup_2011_to_2021_raw %>%
+    select(2:7)
+  
+  rm(lsoa_lookup_2011_to_2021_raw)
+  
+  # check for rows where multiple 2011 LSOAs are merged into 2021 LSOAs
+  lsoa_lookup_2011_to_2021_narrow %>%
+    group_by(LSOA21CD) %>%
+    filter(n() > 1)
+  
+  # joining 2001&2011 pop data in 2011 LSOAs to 2011-2021 LSOA lookup
+  lsoa_pop_01_11_merged_w_21_lsoa = lsoa_pops_2001_and_2011_imputed_only_plus_miss %>%
+    full_join(lsoa_lookup_2011_to_2021_narrow,
+              by = "LSOA11CD")
+  
+  rm(lsoa_pops_2001_and_2011_imputed_only_plus_miss,
+     lsoa_lookup_2011_to_2021_narrow)
+  
+  # aggregating pop values by 2021 LSOAs
+  lsoa_agg_pop_01_11_merged_w_21_lsoa = lsoa_pop_01_11_merged_w_21_lsoa %>%
+    group_by(LSOA21CD) %>%
+    summarize(pop_2011_final = sum(usual_resident_pop_2011),
+              pop_2001_final = sum(pop_2001_imputed_split),
+              LSOA21NM = first(LSOA21NM),
+              LAD22CD = first(LAD22CD),
+              LAD22NM = first(LAD22NM))
+  
+  rm(lsoa_pop_01_11_merged_w_21_lsoa)
+  
+  # merging w 2021 pop data
+  lsoa_pop_01_11_21_merged = lsoa_agg_pop_01_11_merged_w_21_lsoa %>%
+    full_join(lsoa_pop_2021_raw,
+              by = c("LSOA21CD" = "lsoa_21_code")) %>%
+    # dropping repeated LSOA name column
+    select(-"LSOA21NM")
+  
+  rm(lsoa_agg_pop_01_11_merged_w_21_lsoa,
+     lsoa_pop_2021_raw)
+  
+  # identifying 2021 LSOAs with missing 2011 or 2001 pop data
+  lsoa_pop_01_11_21_merged %>%
+    filter(is.na(pop_2011_final) | is.na(pop_2001_final)) %>%
+    nrow()
+  # there are 1044!
+  
+  # again, use the same impute algorithm as before
+  # England's pop grew by factor of 1.14368415562741 between 2001-2021
+  # and by a factor of 1.06492008640114 between 2011-2021
+  # see "Data/eng_wales_pop_over_time.xlsx"
+  # https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/datasets/populationestimatesforukenglandandwalesscotlandandnorthernireland
+  lsoa_pop_01_11_21_miss_imputed = lsoa_pop_01_11_21_merged %>%
+    mutate(pop_2011_final = ifelse(is.na(pop_2011_final),
+                                   total_lsoa_pop_21 / 1.06492008640114,
+                                   pop_2011_final
+    )
+    ) %>%
+    mutate(pop_2001_final = ifelse(is.na(pop_2001_final),
+                                   total_lsoa_pop_21 / 1.14368415562741,
+                                   pop_2001_final
+    )
+    )
+  
+  rm(lsoa_pop_01_11_21_merged)
+  
+  # the land use statistics are only for English 2021 LSOAs
+  # checking we don't have any LSOAs not coded for England or Wales
+  lsoa_pop_01_11_21_miss_imputed %>%
+    filter(!startsWith(LSOA21CD, "E") & !startsWith(LSOA21CD, "W"))
+  # we don't
+  
+  # checking that the number of English LSOAs in the population dataset matches the number in the land use dataset
+  lsoa_pop_01_11_21_miss_imputed %>%
+    filter(startsWith(LSOA21CD, "E")) %>%
+    nrow()
+  # it does - 33755
+  
+  # only keeping English LSOAs
+  lsoa_eng_pop_01_11_21_miss_imputed = lsoa_pop_01_11_21_miss_imputed %>%
+    filter(startsWith(LSOA21CD, "E"))
+  
+  rm(lsoa_pop_01_11_21_miss_imputed)
+  
+  #_______________________________________________________________________________
+  ## importing land use data ####
+  
+  # joining with English LSOA land use data
+  lsoa_eng_pop_01_11_21_imputed_w_land_use = lsoa_eng_pop_01_11_21_miss_imputed %>%
+    left_join(lsoa_land_use_2022_raw,
+              by = c("LSOA21CD" = "lsoa_2021_code")) %>%
+    # dropping duplicated LSOA name col
+    select(-"lsoa_2021_name")
+  
+  #_______________________________________________________________________________
+  ## matching missing LAD codes ####
+  # checking how many distinct LAD codes there are in this LSOA dataset
+  lads_in_lsoa_data = lsoa_eng_pop_01_11_21_imputed_w_land_use %>%
+    distinct(LAD22CD, LAD22NM)
+  # 310 - one of these is NA
+  
+  # splitting by 3-character geocode prefix
+  # E06, E07, E08, E09 (plus NA)
+  lad_prefix_counts = lads_in_lsoa_data %>%
+    mutate(prefix = str_sub(LAD22CD, 1, 3)) %>%
+    group_by(prefix) %>%
+    summarise(count = n_distinct(LAD22CD)) %>%
+    arrange(prefix)
+  print(lad_prefix_counts)
+  # 1 E06       59
+  # 2 E07      181
+  # 3 E08       36
+  # 4 E09       33
+  # 5 NA         1
+  
+  # investigating the NA-valued LAD
+  lsoas_w_missing_lad = lsoa_eng_pop_01_11_21_imputed_w_land_use %>%
+    filter(is.na(LAD22CD))
+  
+  #_______________________________________________________________________________
+  ## ## API call to match unmatched LSOAs to a LAD ####
+  # 
+  # # Create an empty dataframe to store results
+  # lads_to_add = data.frame(
+  #   LSOA21CD = character(),
+  #   LAD22CD = character()
+  # )
+  # # call the findthatpostcode.uk API to match the LAD22CD based on the LSOA
+  # # note that my wifi seems to be slow enough to not hit the rate limit...
+  # # ...if you do start hitting a rate limit, just use a Sys.sleep(`#secs`) command
+  # for(row in 1:nrow(lsoas_w_missing_lad)) {
+  #   lsoa_code_val = lsoas_w_missing_lad[[row, 1]]
+  #   url = paste0("https://findthatpostcode.uk/areas/", lsoa_code_val, ".json")
+  #   response = GET(url)
+  # 
+  #   while (response$status_code == 429) {
+  #     warning(paste("Rate limit exceeded for LSOA code: ", lsoa_code_val," - waiting 60 secs"))
+  #     Sys.sleep(60)  # Wait 60 seconds before continuing
+  #     response = GET(url)
+  #   }
+  # 
+  #   json_data = fromJSON(rawToChar(response$content))
+  # 
+  #   lad22_val = json_data[["included"]][["attributes"]][["itl"]][1]
+  #   
+  #   print(paste0("LSOA: ",lsoa_code_val," has LAD code: ",lad22_val,". Row ",row," complete"))
+  #   lads_to_add = lads_to_add %>%
+  #     add_row(LSOA21CD = lsoa_code_val, LAD22CD = lad22_val)
+  #   
+  # }
+  # 
+  # print("Rounds complete!")
+  # 
+  # # saving backup of API-called dataset
+  # write_csv(lads_to_add, "Data/lads_to_add_backup.csv")
+  ## UNCOMMENT TO HERE IF YOU WANT TO RE-RUN LAD API CALL ##
+  
+  ## COMMENT OUT THE COMMAND BELOW IF YOU WANT TO RE-RUN LAD API CALL ##
+  # loading in dataframe with results of API call
+  # ie LAD codes for entries previously missing them
+  lads_to_add = read_csv("Data/lads_to_add_backup.csv")
+  
+  # add these missing LAD codes back into the LSOA-LAD dataset
+  # note the LAD names are still missing
+  lsoa_eng_pop_01_11_21_nomiss_lad = lsoa_eng_pop_01_11_21_imputed_w_land_use %>%
+    left_join(lads_to_add, by = "LSOA21CD") %>%
+    mutate(LAD22CD = coalesce(LAD22CD.x, LAD22CD.y)) %>%
+    # dropping redundant code columns
+    select(-c("LAD22CD.x","LAD22CD.y"))
+  
+  # now, after merging, checking how many distinct LAD codes there are in this LSOA dataset
+  # remember that the merged LAD22CD values don't have LAD22NM values, so we have to add these manually
+  lads_in_lsoa_data = lsoa_eng_pop_01_11_21_nomiss_lad %>%
+    group_by(LAD22CD) %>%
+    mutate(LAD22NM = first(LAD22NM[!is.na(LAD22NM)])) %>%
+    distinct(LAD22CD, LAD22NM)
+  # 309 values now - the NA value has been dropped
+  
+  # splitting by 3-character geocode prefix
+  # E06, E07, E08, E09 (plus NA)
+  lad_prefix_counts = lads_in_lsoa_data %>%
+    mutate(prefix = str_sub(LAD22CD, 1, 3)) %>%
+    group_by(prefix) %>%
+    summarise(count = n_distinct(LAD22CD)) %>%
+    arrange(prefix)
+  print(lad_prefix_counts)
+  # as before:
+  # 1 E06       59
+  # 2 E07      181
+  # 3 E08       36
+  # 4 E09       33
+  
+  rm(lsoa_eng_pop_01_11_21_miss_imputed,
+     lsoa_land_use_2022_raw)
+  
+  #_______________________________________________________________________________
+  ## LAD permitting rates ####
+  # Extract the list of valid LAD codes from lads_in_lsoa_data
+  valid_lad_codes = lads_in_lsoa_data$LAD22CD
+  
+  # Find LPACDs that don't meet the filter criteria
+  filtered_out_lpacd = perm_rates_raw %>%
+    filter(!LPACD %in% valid_lad_codes) %>%
+    distinct(LPACD) %>%
+    pull(LPACD)
+  
+  # Print the filtered-out LPACD values
+  print("LPACD values that were filtered out:")
+  print(filtered_out_lpacd)
+  
+  perm_rates_data = perm_rates_raw %>%
+    # Filter to keep only LPACDs that match the LAD22CD values
+    filter(LPACD %in% valid_lad_codes) %>%
+    # Replace ".." with NA and then convert to numeric
+    mutate(major_dwellings = ifelse(`Total granted; major dwellings (all)` == "..", NA, `Total granted; major dwellings (all)`),
+           minor_dwellings = ifelse(`Total granted; minor dwellings (all)` == "..", NA, `Total granted; minor dwellings (all)`),
+           major_dwellings = as.numeric(major_dwellings),
+           minor_dwellings = as.numeric(minor_dwellings),
+           year = as.numeric(substr(Quarter, 1, 4))) %>%
+    # Group and sum by LPACD and year
+    group_by(LPACD, LPANM, year) %>%
+    summarise(total_dwellings = sum(major_dwellings, na.rm = TRUE) + sum(minor_dwellings, na.rm = TRUE),
+              .groups = 'drop') %>%
+    # up to and including 2021
+    filter(year <= 2021) %>%
+    # Pivot wider to get years as columns
+    pivot_wider(names_from = year,
+                values_from = total_dwellings,
+                names_prefix = "total_maj_and_min_dwellings_")
+  
+  #_______________________________________________________________________________
+  ## imputing missing permitting data using linear regression ####
+  # Convert to long format for easier analysis of missing patterns
+  perm_rates_long = perm_rates_data %>%
+    pivot_longer(cols = starts_with("total_maj_and_min_dwellings_"),
+                 names_to = "year", 
+                 values_to = "total_dwellings") %>%
+    mutate(year = as.numeric(gsub("total_maj_and_min_dwellings_", "", year)))
+  
+  # Check which LPACDs have all missing values or only 1 non-missing value
+  missing_data_check = perm_rates_long %>%
+    group_by(LPACD) %>%
+    summarise(LPANM = first(LPANM),
+              n_missing = sum(is.na(total_dwellings)),
+              n_total = n(),
+              n_non_missing = n_total - n_missing,
+              .groups = 'drop') %>%
+    filter(n_missing == n_total | n_non_missing <= 1)
+  
+  # Create the vector of LPACDs that can't be imputed
+  lpacd_noimp_miss_val = missing_data_check$LPACD
+  
+  # Function to perform linear imputation for a single LPACD
+  impute_missing = function(data) {
+    # Check if we have any non-missing data
+    if(sum(!is.na(data$total_dwellings)) < 2) {
+      # If less than 2 non-missing points, we can't do linear regression
+      # Return original data
+      return(data)
+    }
+    
+    # Fit linear model on non-missing data
+    model = lm(total_dwellings ~ year, data = data[!is.na(data$total_dwellings),])
+    
+    # Predict for all years
+    data$total_dwellings_imputed = predict(model, newdata = data)
+    
+    # Apply zero floor to predictions (replace negative values with zero)
+    # so that there are no predicted negative values for the number of permits
+    data$total_dwellings_imputed = pmax(data$total_dwellings_imputed, 0)
+    
+    # Use original values where available, imputed values where missing
+    data$total_dwellings_final = ifelse(is.na(data$total_dwellings), 
+                                        data$total_dwellings_imputed,
+                                        data$total_dwellings)
     return(data)
   }
   
-  # Fit linear model on non-missing data
-  model = lm(total_dwellings ~ year, data = data[!is.na(data$total_dwellings),])
+  # Now apply imputation
+  perm_rates_imputed = perm_rates_long %>%
+    group_by(LPACD, LPANM) %>%
+    group_modify(~impute_missing(.x)) %>%
+    ungroup()
   
-  # Predict for all years
-  data$total_dwellings_imputed = predict(model, newdata = data)
+  # Reshape back to wide format
+  perm_rates_final = perm_rates_imputed %>%
+    select(-total_dwellings, -total_dwellings_imputed) %>%  # Remove intermediate columns
+    pivot_wider(names_from = year,
+                values_from = total_dwellings_final,
+                names_prefix = "total_maj_and_min_dwellings_")
   
-  # Apply zero floor to predictions (replace negative values with zero)
-  # so that there are no predicted negative values for the number of permits
-  data$total_dwellings_imputed = pmax(data$total_dwellings_imputed, 0)
+  # Print these LPACDs
+  print("LPACDs with all missing values or only 1 non-missing value (can't perform imputation):")
+  print(missing_data_check)
+  # 2 of these
   
-  # Use original values where available, imputed values where missing
-  data$total_dwellings_final = ifelse(is.na(data$total_dwellings), 
-                                      data$total_dwellings_imputed,
-                                      data$total_dwellings)
-  return(data)
-}
-
-# Now apply imputation
-perm_rates_imputed = perm_rates_long %>%
-  group_by(LPACD, LPANM) %>%
-  group_modify(~impute_missing(.x)) %>%
-  ungroup()
-
-# Reshape back to wide format
-perm_rates_final = perm_rates_imputed %>%
-  select(-total_dwellings, -total_dwellings_imputed) %>%  # Remove intermediate columns
-  pivot_wider(names_from = year,
-              values_from = total_dwellings_final,
-              names_prefix = "total_maj_and_min_dwellings_")
-
-# Print these LPACDs
-print("LPACDs with all missing values or only 1 non-missing value (can't perform imputation):")
-print(missing_data_check)
-# 2 of these
-
-# for the 2 LPACDs with missing (non-imputable) values
-# use median values of permitting numbers from bordering LADs in the same region
-# https://ons.maps.arcgis.com/apps/webappviewer/index.html?id=5cec9cc7208d418fbc1e7f538cb8745f
-# North Northamptonshire E06000061 
-lads_bordering_E06000061 = c("E06000017", # Rutland
-                             "E07000141", # South Kesteven
-                             "E06000031", # Peterborough
-                             "E07000011", # Huntingdonshire
-                             "E06000055", # Bedford
-                             "E06000042", # Milton Keynes
-                             "E06000062", # West Northamptonshire
-                             "E07000131" # Harborough
-)
-
-# West Northamptonshire E06000062 
-lads_bordering_E06000062 = c("E07000131", # Harborough
-                             "E06000061", # North Northamptonshire
-                             "E06000042", # Milton Keynes
-                             "E06000060", # Buckinghamshire
-                             "E07000177", # Cherwell
-                             "E07000221", # Stratford-upon-Avon
-                             "E07000220" # Rugby
-)
-
-# Function to impute values based on bordering LADs
-impute_from_bordering_lads = function(target_lpacd, bordering_lpacds, data_wide, data_long) {
-  # Filter bordering LADs that exist in the dataset and aren't in missing_data_check
-  valid_bordering_lpacds = bordering_lpacds[bordering_lpacds %in% 
-                                              setdiff(unique(data_long$LPACD), 
-                                                      lpacd_noimp_miss_val)]
+  # for the 2 LPACDs with missing (non-imputable) values
+  # use median values of permitting numbers from bordering LADs in the same region
+  # https://ons.maps.arcgis.com/apps/webappviewer/index.html?id=5cec9cc7208d418fbc1e7f538cb8745f
+  # North Northamptonshire E06000061 
+  lads_bordering_E06000061 = c("E06000017", # Rutland
+                               "E07000141", # South Kesteven
+                               "E06000031", # Peterborough
+                               "E07000011", # Huntingdonshire
+                               "E06000055", # Bedford
+                               "E06000042", # Milton Keynes
+                               "E06000062", # West Northamptonshire
+                               "E07000131" # Harborough
+  )
   
-  if(length(valid_bordering_lpacds) == 0) {
-    warning(paste("No valid bordering LADs found for", target_lpacd))
-    return(NULL)
+  # West Northamptonshire E06000062 
+  lads_bordering_E06000062 = c("E07000131", # Harborough
+                               "E06000061", # North Northamptonshire
+                               "E06000042", # Milton Keynes
+                               "E06000060", # Buckinghamshire
+                               "E07000177", # Cherwell
+                               "E07000221", # Stratford-upon-Avon
+                               "E07000220" # Rugby
+  )
+  
+  # Function to impute values based on bordering LADs
+  impute_from_bordering_lads = function(target_lpacd, bordering_lpacds, data_wide, data_long) {
+    # Filter bordering LADs that exist in the dataset and aren't in missing_data_check
+    valid_bordering_lpacds = bordering_lpacds[bordering_lpacds %in% 
+                                                setdiff(unique(data_long$LPACD), 
+                                                        lpacd_noimp_miss_val)]
+    
+    if(length(valid_bordering_lpacds) == 0) {
+      warning(paste("No valid bordering LADs found for", target_lpacd))
+      return(NULL)
+    }
+    
+    # Get the name of the target LAD
+    target_name = missing_data_check$LPANM[missing_data_check$LPACD == target_lpacd]
+    
+    # Get data for bordering LADs in long format
+    bordering_data_long = data_long %>%
+      filter(LPACD %in% valid_bordering_lpacds)
+    
+    # Calculate median values for each year
+    imputed_values = bordering_data_long %>%
+      group_by(year) %>%
+      summarise(total_dwellings_final = median(total_dwellings_final, na.rm = TRUE),
+                .groups = 'drop') %>%
+      # Add target LPACD and name
+      mutate(LPACD = target_lpacd,
+             LPANM = target_name)
+    
+    return(imputed_values)
   }
   
-  # Get the name of the target LAD
-  target_name = missing_data_check$LPANM[missing_data_check$LPACD == target_lpacd]
+  # Create data structure to store all imputed values
+  bordering_imputed_values = list()
   
-  # Get data for bordering LADs in long format
-  bordering_data_long = data_long %>%
-    filter(LPACD %in% valid_bordering_lpacds)
+  # Apply imputation for each LPACD in missing_data_check
+  bordering_imputed_values[["E06000061"]] = impute_from_bordering_lads(
+    "E06000061", lads_bordering_E06000061, perm_rates_final, perm_rates_imputed)
   
-  # Calculate median values for each year
-  imputed_values = bordering_data_long %>%
-    group_by(year) %>%
-    summarise(total_dwellings_final = median(total_dwellings_final, na.rm = TRUE),
-              .groups = 'drop') %>%
-    # Add target LPACD and name
-    mutate(LPACD = target_lpacd,
-           LPANM = target_name)
+  bordering_imputed_values[["E06000062"]] = impute_from_bordering_lads(
+    "E06000062", lads_bordering_E06000062, perm_rates_final, perm_rates_imputed)
   
-  return(imputed_values)
+  # Combine all imputed values into a single dataframe
+  bordering_imputed_combined = bind_rows(bordering_imputed_values)
+  
+  # Convert back to wide format for merging with main dataset
+  bordering_imputed_wide = bordering_imputed_combined %>%
+    pivot_wider(id_cols = c(LPACD, LPANM),
+                names_from = year,
+                values_from = total_dwellings_final,
+                names_prefix = "total_maj_and_min_dwellings_")
+  
+  # Remove the non-imputable LPACDs from the final dataset
+  perm_rates_final_cleaned = perm_rates_final %>%
+    filter(!LPACD %in% lpacd_noimp_miss_val)
+  
+  # Add the newly imputed values
+  perm_rates_final_with_bordering = bind_rows(
+    perm_rates_final_cleaned,
+    bordering_imputed_wide
+  )
+  
+  # Print summary of imputation results
+  cat("\nImputation summary:\n")
+  cat("Number of LPACDs that couldn't be imputed with linear regression:", length(lpacd_noimp_miss_val), "\n")
+  cat("Number of LPACDs successfully imputed using bordering LADs:", 
+      nrow(bordering_imputed_wide), "\n")
+  
+  # removing intermediate datasets
+  rm(list = ls(pattern = "^lads_bordering_E0"))
+  rm(bordering_imputed_combined,
+     bordering_imputed_values,
+     bordering_imputed_wide,
+     perm_rates_data,
+     perm_rates_final,
+     perm_rates_final_cleaned,
+     perm_rates_imputed,
+     perm_rates_long,
+     perm_rates_raw)
+  
+  # Identify which LPACD value is duplicated
+  duplicated_lpacd = perm_rates_final_with_bordering %>%
+    group_by(LPACD) %>%
+    filter(n() > 1) %>%
+    pull(LPACD) %>%
+    unique()
+  
+  # Confirm it's E07000112 as you mentioned
+  print(duplicated_lpacd)
+  
+  # Extract the duplicate rows
+  duplicate_rows = perm_rates_final_with_bordering %>%
+    filter(LPACD == duplicated_lpacd)
+  
+  # Create the aggregated row:
+  # 1. Keep LPACD as E07000112
+  # 2. Keep LPANM as "Folkestone and Hythe"
+  # 3. Sum all other columns
+  aggregated_row = duplicate_rows %>%
+    summarize(
+      LPACD = first(LPACD),
+      LPANM = first(LPANM),
+      across(where(is.numeric), sum)
+    )
+  
+  # Remove the duplicate rows from the original dataframe
+  perm_rates_final_with_bordering = perm_rates_final_with_bordering %>%
+    filter(LPACD != duplicated_lpacd)
+  
+  # Add the aggregated row back to the dataframe
+  perm_rates_final_with_bordering = bind_rows(
+    perm_rates_final_with_bordering, 
+    aggregated_row
+  )
+  
+  # Verify no more duplicates exist
+  any_duplicates = perm_rates_final_with_bordering %>%
+    group_by(LPACD) %>%
+    filter(n() > 1) %>%
+    nrow()
+  
+  print(paste0("Duplicates remaining: ", any_duplicates))
+  
+  # Calculate sum of permits for 2001-2011 and 2001-2021 periods
+  perm_rates_summary = perm_rates_final_with_bordering %>%
+    rowwise() %>%
+    mutate(# Sum of permits for 2001-2011
+      sum_perms_01_11 = sum(
+        c_across(starts_with("total_maj_and_min_dwellings_2001"):starts_with("total_maj_and_min_dwellings_2011")),
+        na.rm = TRUE),
+      # Sum of permits for 2001-2021
+      sum_perms_01_21 = sum(
+        c_across(starts_with("total_maj_and_min_dwellings_")),
+        na.rm = TRUE)) %>%
+    
+    ungroup() %>%
+    # Keep only LPACD, LPANM, and the new sum columns
+    select(LPACD, LPANM, sum_perms_01_11, sum_perms_01_21)
+  
+  rm(perm_rates_final_with_bordering,
+     duplicate_rows)
+  
+  # # joining LSOA pop & land use data to LSOA-BUA lookup
+  # lsoa_bua_eng_pop_01_11_21_land_use = lsoa_eng_pop_01_11_21_nomiss_lad %>%
+  # left_join(lsoa_bua_eng_lookup_2021_complete,
+  #           by = "LSOA21CD") %>%
+  # # dropping duplicated LSOA name col
+  # select(-c("lsoa_21_name")) %>%
+  # # dropping invalid BUA code (E63999999)
+  # filter(BUA22CD != "E63999999")
+  
+  #_______________________________________________________________________________
+  ## LSOA to BUA data ####
+  
+  # cleaning
+  lsoa_bua_eng_lookup_2021_narrow = lsoa_bua_lookup_2021_raw %>%
+    # removing irrelevant cols from LSOA to BUA lookup
+    select(-c(ends_with("W"),"ObjectId")) %>%
+    # keeping only English LSOAs
+    filter(startsWith(LSOA21CD, "E"))
+  # 33755 rows - matches number in pop & land use dataframe
+  
+  rm(lsoa_bua_lookup_2021_raw)
+  
+  # identifying any rows that have any missing entries
+  missing_buas = lsoa_bua_eng_lookup_2021_narrow %>%
+    filter(if_any(everything(), is.na)) %>%
+    # keeping only the LSOA codes
+    select("LSOA21CD")
+  # there are lots (2280)
+  
+  #_______________________________________________________________________________
+  ## ## API to match unmatched LSOAs to BUAs ####
+  # 
+  # library(httr)
+  # library(jsonlite)
+  # 
+  # # Create an empty dataframe to store results
+  # buas_to_add = data.frame(
+  #   LSOA21CD = character(),
+  #   BUA22CD = character()
+  # )
+  # # call the findthatpostcode.uk API to match the BUA22CD based on the LSOA
+  # # note that my wifi seems to be slow enough to not hit the rate limit...
+  # # ...if you do start hitting a rate limit, just use a Sys.sleep(`#secs`) command
+  # for(row in 1:nrow(missing_buas)) {
+  #   lsoa_code_val = missing_buas[[row, 1]]
+  #   url = paste0("https://findthatpostcode.uk/areas/", lsoa_code_val, ".json")
+  #   response = GET(url)
+  #   
+  #   while (response$status_code == 429) {
+  #     warning(paste("Rate limit exceeded for LSOA code: ", lsoa_code_val," - waiting 60 secs"))
+  #     Sys.sleep(60)  # Wait 60 seconds before continuing
+  #     response = GET(url)
+  #   }
+  #   
+  #   json_data = fromJSON(rawToChar(response$content))
+  #   
+  #   # for some reason, the API will sometimes give an invalid BUA code - E63999999.
+  #   # in some cases, it seems to be legitimate (probably, there's no BUA present)
+  #   # but in others, the solution seems to be to just keep asking
+  #   # and eventually, it will return a correct BUA code!
+  #   E63999999_count = 1
+  #   max_E63999999_count = 20
+  #   
+  #   while (json_data[["included"]][["attributes"]][["bua22"]][1] == "E63999999" && E63999999_count <= max_E63999999_count) {
+  #     print(paste0("LSOA: ",missing_buas[[row, 1]]," gave E63999999 (invalid code)"))
+  #     response = GET(url)
+  #     json_data = fromJSON(rawToChar(response$content))
+  #     bua22_val = json_data[["included"]][["attributes"]][["bua22"]][1]
+  #     E63999999_count = E63999999_count + 1
+  #   }
+  #   
+  #   bua22_val = json_data[["included"]][["attributes"]][["bua22"]][1]
+  #   
+  #   if (E63999999_count > max_E63999999_count) {
+  #     print(paste0("LSOA: ",missing_buas[[row, 1]]," kept giving E63999999 (invalid code) even after ",max_E63999999_count," attempts - assigning it E63999999. Row ",row," complete"))
+  #   } else {
+  #     print(paste0("LSOA: ",lsoa_code_val," has BUA code: ",bua22_val,". Row ",row," complete"))
+  #   }
+  #   buas_to_add = buas_to_add %>%
+  #     add_row(LSOA21CD = lsoa_code_val, BUA22CD = bua22_val)
+  # }
+  # 
+  # print("Rounds complete!")
+  # 
+  # # saving backup of API-called dataset
+  # write_csv(buas_to_add, "Data/buas_to_add_backup.csv")
+  # 
+  # # checking for invalid BUA code (E63999999)
+  # buas_to_add %>%
+  #   filter(BUA22CD == "E63999999") %>%
+  #   nrow
+  # # 203 LSOAs have invalid corresponding BUA code
+  ## UNCOMMENT TO HERE IF YOU WANT TO RE-RUN BUA API CALL!!!!!!!!!!!!!!!!!!!!! ##
+  
+  ## COMMENT OUT THE COMMAND BELOW IF YOU WANT TO RE-RUN BUA API CALL!!!!!!!!!!!!!!!!!!!!! ##
+  # loading in dataframe with results of API call
+  # ie BUA codes for entries previously missing them
+  buas_to_add = read_csv("Data/buas_to_add_backup.csv")
+  
+  rm(missing_buas)
+  
+  #_______________________________________________________________________________
+  ## merging BUA API data with other datasets ####
+  
+  # add these missing BUA codes back into the LSOA-BUA lookup
+  # note the BUA names are still missing
+  lsoa_bua_eng_lookup_2021_complete = lsoa_bua_eng_lookup_2021_narrow %>%
+    left_join(buas_to_add, by = "LSOA21CD") %>%
+    mutate(BUA22CD = coalesce(BUA22CD.x, BUA22CD.y)) %>%
+    # dropping redundant BUA code columns
+    select(-c("BUA22CD.x","BUA22CD.y"))
+  
+  rm(lsoa_bua_eng_lookup_2021_narrow)
+  
+  # checking again for invalid BUA code (E63999999)
+  lsoa_bua_eng_lookup_2021_complete %>%
+    filter(BUA22CD == "E63999999") %>%
+    print(n = 10000)
+  
+  # joining LSOA pop & land use data to LSOA-BUA lookup
+  lsoa_bua_eng_pop_01_11_21_land_use = lsoa_eng_pop_01_11_21_nomiss_lad %>%
+    left_join(lsoa_bua_eng_lookup_2021_complete,
+              by = "LSOA21CD") %>%
+    # coalescing repeated columns
+    mutate(LAD22NM = coalesce(LAD22NM.x, LAD22NM.y)) %>%
+    mutate(LAD22CD = coalesce(LAD22CD.x, LAD22CD.y)) %>%
+    # dropping duplicated column names
+    select(-c("lsoa_21_name", 
+              "LAD22NM.x","LAD22NM.y",
+              "LAD22CD.x","LAD22CD.y")) %>%
+    # dropping invalid BUA code (E63999999)
+    filter(BUA22CD != "E63999999")
+  
+  rm(lsoa_bua_eng_lookup_2021_complete)
+  
+  # checking to see if anything is missing
+  lsoa_bua_eng_pop_01_11_21_land_use %>%
+    filter(is.na(BUA22CD))
+  # nothing else missing - good!
+  
+  # I noticed an error in one of the LSOA to BUA codings
+  # rectifying
+  lsoa_bua_eng_pop_01_11_21_land_use = lsoa_bua_eng_pop_01_11_21_land_use %>%
+    mutate(
+      BUA22NM = if_else(LSOA21CD == "E01002946", "Kingston upon Thames", BUA22NM),
+      BUA22CD = if_else(LSOA21CD == "E01002946", "E63005164", BUA22CD)
+    )
+  
+  #_______________________________________________________________________________
+  ## using LAD permit data to estimate BUA permit data ####
+  # Create a mapping table
+  lsoa_mapping = lsoa_bua_eng_pop_01_11_21_land_use %>%
+    select(LSOA21CD, LAD22CD, BUA22CD, pop_2001_final) %>%
+    # Ensure we have the BUA code for each LSOA
+    filter(!is.na(BUA22CD))
+  
+  # calculating proportion of the LAD population living in each BUA
+  lad_bua_population = lsoa_mapping %>%
+    # Group by LAD and BUA
+    group_by(LAD22CD, BUA22CD) %>%
+    # Sum population for each LAD-BUA combination
+    summarise(bua_in_lad_population = sum(pop_2001_final, na.rm = TRUE),
+              .groups = "drop") %>%
+    # Calculate total population by LAD
+    group_by(LAD22CD) %>%
+    mutate(lad_total_population = sum(bua_in_lad_population),
+           # Calculate proportion of LAD population in each BUA
+           population_proportion = bua_in_lad_population / lad_total_population) %>%
+    ungroup()
+  # checking for any missing rows:
+  lad_bua_population %>% filter(if_any(everything(), is.na))
+  # nothing - good
+  
+  # applying population proportions to distribute LAD-level permitting data to BUAs
+  bua_permits = lad_bua_population %>%
+    # Join with permitting data (assuming you've matched LAD22CD with LPACD)
+    left_join(perm_rates_summary, by = c("LAD22CD" = "LPACD")) %>%
+    # Calculate BUA-level permits based on population proportion
+    mutate(
+      sum_bua_perms_01_11 = sum_perms_01_11 * population_proportion,
+      sum_bua_perms_01_21 = sum_perms_01_21 * population_proportion
+    )
+  
+  # Aggregate to get total permits for each BUA (summing across LADs)
+  bua_total_permits = bua_permits %>%
+    group_by(BUA22CD) %>%
+    summarise(
+      bua_pop_01 = sum(bua_in_lad_population, na.rm = TRUE),
+      sum_bua_perms_01_11 = sum(sum_bua_perms_01_11, na.rm = TRUE),
+      sum_bua_perms_01_21 = sum(sum_bua_perms_01_21, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  rm(lsoa_eng_pop_01_11_21_nomiss_lad)
+  
+  #_______________________________________________________________________________
+  ## final joining incl London ####
+  
+  # aggregating london BUAs
+  # need to aggregate London BUAs
+  london_buas = data.frame(
+    BUA22NM = c("City and County of the City of London",
+                "Barking and Dagenham",
+                "Barnet",
+                "Bexley",
+                "Brent",
+                "Bromley",
+                "Camden",
+                "Croydon",
+                "Ealing",
+                "Enfield",
+                "Greenwich",
+                "Hackney",
+                "Hammersmith and Fulham",
+                "Haringey",
+                "Harrow",
+                "Havering",
+                "Hillingdon",
+                "Hounslow",
+                "Islington",
+                "Kensington and Chelsea",
+                "Kingston upon Thames",
+                "Lambeth",
+                "Lewisham",
+                "Merton",
+                "Newham",
+                "Redbridge",
+                "Richmond upon Thames",
+                "Southwark",
+                "Sutton (Sutton)",
+                "Tower Hamlets",
+                "Waltham Forest",
+                "Wandsworth",
+                "City of Westminster"
+    ),
+    
+    BUA22CD = c("E63004906",
+                "E63004859",
+                "E63004747",
+                "E63004992",
+                "E63004844",
+                "E63005189",
+                "E63004858",
+                "E63005267",
+                "E63004894",
+                "E63004679",
+                "E63004986",
+                "E63004850",
+                "E63004944",
+                "E63004793",
+                "E63004781",
+                "E63004796",
+                "E63004882",
+                "E63005014",
+                "E63004860",
+                "E63004950",
+                "E63005164",
+                "E63005063",
+                "E63005035",
+                "E63005121",
+                "E63004881",
+                "E63004790",
+                "E63005073",
+                "E63004965",
+                "E63005250",
+                "E63004898",
+                "E63004797",
+                "E63005033",
+                "E63004916"
+    )
+  )
+  
+  ## Aggregating London BUA permit data level ####
+  bua_total_permits_lon = bua_total_permits %>%
+    # Replace London BUA codes with a single user-defined code
+    mutate(BUA22CD = ifelse(BUA22CD %in% london_buas$BUA22CD,
+                            "LON999999", 
+                            BUA22CD)) %>%
+    # Group by the modified BUA22CD
+    group_by(BUA22CD) %>%
+    # Create the aggregations
+    summarize(bua_pop_01 = sum(bua_pop_01),
+              sum_bua_perms_01_11 = sum(sum_bua_perms_01_11),
+              sum_bua_perms_01_21 = sum(sum_bua_perms_01_21)) %>%
+    # total permits per initial housing unit (i.e. per initial individual)
+    # "initial" meaning 2001
+    mutate(bua_perm_rate_01_11 = sum_bua_perms_01_11 / bua_pop_01,
+           bua_perm_rate_01_21 = sum_bua_perms_01_21 / bua_pop_01)
+  
+  ## Aggregating up to BUA level ####
+  agg_eng_pop_01_11_21_land_use_w_london = lsoa_bua_eng_pop_01_11_21_land_use %>%
+    # Replace London BUA codes with a single user-defined code
+    mutate(BUA22CD = ifelse(BUA22CD %in% london_buas$BUA22CD,
+                            "LON999999", 
+                            BUA22CD)) %>%
+    mutate(BUA22NM = ifelse(BUA22NM %in% london_buas$BUA22NM, 
+                            "Greater London", 
+                            BUA22NM)) %>%
+    # Group by the modified BUA22CD
+    group_by(BUA22CD) %>%
+    # Create the aggregations
+    summarize(
+      # Keep first non-empty BUA22NM
+      BUA22NM = first(na.omit(BUA22NM)),
+      RGN22CD = first(na.omit(RGN22CD)),
+      RGN22NM = first(na.omit(RGN22NM)),
+      bua_01_pop = sum(pop_2001_final),
+      bua_11_pop = sum(pop_2011_final),
+      bua_21_pop = sum(total_lsoa_pop_21),
+      # 1/z_i is fraction of land that's geographically unconstrained
+      # so z_i is 1/(1-fraction of land that's geographically *constrained*)
+      # calculating different values, averaging/summarising land constraints in different ways
+      mean_z_i = 1/(1-(mean(pct_forest_open_land_water) / 100)),
+      median_z_i = 1/(1-(median(pct_forest_open_land_water) / 100)),
+      min_z_i = 1/(1-(min(pct_forest_open_land_water) / 100))
+    )
+  
+  #_______________________________________________________________________________
+  ## merging permit data with main dataset ####
+  agg_eng_pop_01_11_21_land_use_w_london = agg_eng_pop_01_11_21_land_use_w_london %>%
+    left_join(bua_total_permits_lon,
+              by = "BUA22CD") %>%
+    select(-c("bua_pop_01"))
+  
+  rm(lsoa_bua_eng_pop_01_11_21_land_use,
+     bua_total_permits_lon,
+     london_buas)
+  
+  # drop any BUAs that are below your city size threshold (20k)
+  agg_pop_01_11_21_ovr_city_threshold = agg_eng_pop_01_11_21_land_use_w_london %>%
+    filter(bua_21_pop >= city_pop_threshold)
+  
+  rm(agg_eng_pop_01_11_21_land_use_w_london)
+  
+  # check to see if there are any remaining BUAs with no name
+  agg_pop_01_11_21_ovr_city_threshold %>%
+    filter(is.na(BUA22NM))
+  # there are none
+  
+  # rounding population values
+  agg_pop_01_11_21_ovr_city_threshold_rounded = agg_pop_01_11_21_ovr_city_threshold %>%
+    mutate(across(c(bua_01_pop, bua_11_pop, bua_21_pop), round)) %>%
+    select(-c("sum_bua_perms_01_11","sum_bua_perms_01_21"))
+  
+  #_______________________________________________________________________________
+  ## adding in research labour share values (l_i) ####
+  # from p.11 https://www.enterpriseresearch.ac.uk/wp-content/uploads/2021/09/ERC-Insight-The-UK%E2%80%99s-business-RD-workforce-Belt.Ri_.Akinremi.pdf
+  agg_pop_01_11_21_ovr_city_threshold_rounded = agg_pop_01_11_21_ovr_city_threshold_rounded %>%
+    mutate(l_i = case_when(
+      RGN22NM == "North East" ~ 0.0052,
+      RGN22NM == "North West" ~ 0.0060,
+      RGN22NM == "Yorkshire and The Humber" ~ 0.0056,
+      RGN22NM == "East Midlands" ~ 0.0088,
+      RGN22NM == "West Midlands" ~ 0.0097,
+      RGN22NM == "East of England" ~ 0.0143,
+      RGN22NM == "London" ~ 0.0069,
+      RGN22NM == "South East" ~ 0.013,
+      RGN22NM == "South West" ~ 0.0083
+    ))
+  
+  rm(agg_pop_01_11_21_ovr_city_threshold,
+     perm_rates_summary,
+     valid_lad_codes,
+     filtered_out_lpacd,
+     lpacd_noimp_miss_val,
+     any_duplicates,
+     missing_data_check,
+     lsoa_mapping,
+     lsoa_eng_pop_01_11_21_imputed_w_land_use,
+     lsoas_w_missing_lad,
+     lads_in_lsoa_data,
+     lads_to_add,
+     lad_prefix_counts,
+     lad_bua_population,
+     buas_to_add,
+     bua_total_permits,
+     bua_permits,
+     aggregated_row)
+  
+  #_______________________________________________________________________________
+  # testing the original DP model on data ####
+  
+  # total population of England
+  # https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/timeseries/enpop/pop
+  tot_01_pop = 49449700
+  tot_21_pop = 56554900
+  
+  # urban population based on aggregated BUA dataset
+  urb_01_pop = sum(agg_pop_01_11_21_ovr_city_threshold_rounded$bua_01_pop)
+  urb_21_pop = sum(agg_pop_01_11_21_ovr_city_threshold_rounded$bua_21_pop)
+  
+  # rural pop is difference between total and urban pop
+  rur_01_pop = tot_01_pop - urb_01_pop
+  rur_21_pop = tot_21_pop - urb_21_pop
+  
+  # removing irrelevant geographic constraint variables
+  geographic_constraint_list_for_removal = geographic_constraint_potential_list[geographic_constraint_potential_list != geographic_constraint]
+  agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints = agg_pop_01_11_21_ovr_city_threshold_rounded %>%
+    select(-all_of(geographic_constraint_list_for_removal)) %>%
+    # arranging by descending order of 2021 population
+    arrange(desc(bua_21_pop))
+  
+  # intermediate save
+  write_csv(agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints,
+            "Data/agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints.csv")
+  
+  #_______________________________________________________________________________
+  # intermediate save - can run from here ####
+  agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints = read_csv("Data/agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints.csv")
+  
+  rm(
+    counterfactual_results_tibble,
+    agg_pop_01_11_21_ovr_city_threshold_rounded
+  )
 }
-
-# Create data structure to store all imputed values
-bordering_imputed_values = list()
-
-# Apply imputation for each LPACD in missing_data_check
-bordering_imputed_values[["E06000061"]] = impute_from_bordering_lads(
-  "E06000061", lads_bordering_E06000061, perm_rates_final, perm_rates_imputed)
-
-bordering_imputed_values[["E06000062"]] = impute_from_bordering_lads(
-  "E06000062", lads_bordering_E06000062, perm_rates_final, perm_rates_imputed)
-
-# Combine all imputed values into a single dataframe
-bordering_imputed_combined = bind_rows(bordering_imputed_values)
-
-# Convert back to wide format for merging with main dataset
-bordering_imputed_wide = bordering_imputed_combined %>%
-  pivot_wider(id_cols = c(LPACD, LPANM),
-              names_from = year,
-              values_from = total_dwellings_final,
-              names_prefix = "total_maj_and_min_dwellings_")
-
-# Remove the non-imputable LPACDs from the final dataset
-perm_rates_final_cleaned = perm_rates_final %>%
-  filter(!LPACD %in% lpacd_noimp_miss_val)
-
-# Add the newly imputed values
-perm_rates_final_with_bordering = bind_rows(
-  perm_rates_final_cleaned,
-  bordering_imputed_wide
-)
-
-# Print summary of imputation results
-cat("\nImputation summary:\n")
-cat("Number of LPACDs that couldn't be imputed with linear regression:", length(lpacd_noimp_miss_val), "\n")
-cat("Number of LPACDs successfully imputed using bordering LADs:", 
-    nrow(bordering_imputed_wide), "\n")
-
-# removing intermediate datasets
-rm(list = ls(pattern = "^lads_bordering_E0"))
-rm(bordering_imputed_combined,
-   bordering_imputed_values,
-   bordering_imputed_wide,
-   perm_rates_data,
-   perm_rates_final,
-   perm_rates_final_cleaned,
-   perm_rates_imputed,
-   perm_rates_long,
-   perm_rates_raw)
-
-# Identify which LPACD value is duplicated
-duplicated_lpacd = perm_rates_final_with_bordering %>%
-  group_by(LPACD) %>%
-  filter(n() > 1) %>%
-  pull(LPACD) %>%
-  unique()
-
-# Confirm it's E07000112 as you mentioned
-print(duplicated_lpacd)
-
-# Extract the duplicate rows
-duplicate_rows = perm_rates_final_with_bordering %>%
-  filter(LPACD == duplicated_lpacd)
-
-# Create the aggregated row:
-# 1. Keep LPACD as E07000112
-# 2. Keep LPANM as "Folkestone and Hythe"
-# 3. Sum all other columns
-aggregated_row = duplicate_rows %>%
-  summarize(
-    LPACD = first(LPACD),
-    LPANM = first(LPANM),
-    across(where(is.numeric), sum)
-  )
-
-# Remove the duplicate rows from the original dataframe
-perm_rates_final_with_bordering = perm_rates_final_with_bordering %>%
-  filter(LPACD != duplicated_lpacd)
-
-# Add the aggregated row back to the dataframe
-perm_rates_final_with_bordering = bind_rows(
-  perm_rates_final_with_bordering, 
-  aggregated_row
-)
-
-# Verify no more duplicates exist
-any_duplicates = perm_rates_final_with_bordering %>%
-  group_by(LPACD) %>%
-  filter(n() > 1) %>%
-  nrow()
-
-print(paste0("Duplicates remaining: ", any_duplicates))
-
-# Calculate sum of permits for 2001-2011 and 2001-2021 periods
-perm_rates_summary = perm_rates_final_with_bordering %>%
-  rowwise() %>%
-  mutate(# Sum of permits for 2001-2011
-    sum_perms_01_11 = sum(
-      c_across(starts_with("total_maj_and_min_dwellings_2001"):starts_with("total_maj_and_min_dwellings_2011")),
-      na.rm = TRUE),
-    # Sum of permits for 2001-2021
-    sum_perms_01_21 = sum(
-      c_across(starts_with("total_maj_and_min_dwellings_")),
-      na.rm = TRUE)) %>%
-  
-  ungroup() %>%
-  # Keep only LPACD, LPANM, and the new sum columns
-  select(LPACD, LPANM, sum_perms_01_11, sum_perms_01_21)
-
-rm(perm_rates_final_with_bordering,
-   duplicate_rows)
-
-# # joining LSOA pop & land use data to LSOA-BUA lookup
-# lsoa_bua_eng_pop_01_11_21_land_use = lsoa_eng_pop_01_11_21_nomiss_lad %>%
-# left_join(lsoa_bua_eng_lookup_2021_complete,
-#           by = "LSOA21CD") %>%
-# # dropping duplicated LSOA name col
-# select(-c("lsoa_21_name")) %>%
-# # dropping invalid BUA code (E63999999)
-# filter(BUA22CD != "E63999999")
-
-#_______________________________________________________________________________
-## LSOA to BUA data ####
-
-# cleaning
-lsoa_bua_eng_lookup_2021_narrow = lsoa_bua_lookup_2021_raw %>%
-  # removing irrelevant cols from LSOA to BUA lookup
-  select(-c(ends_with("W"),"ObjectId")) %>%
-  # keeping only English LSOAs
-  filter(startsWith(LSOA21CD, "E"))
-# 33755 rows - matches number in pop & land use dataframe
-
-rm(lsoa_bua_lookup_2021_raw)
-
-# identifying any rows that have any missing entries
-missing_buas = lsoa_bua_eng_lookup_2021_narrow %>%
-  filter(if_any(everything(), is.na)) %>%
-  # keeping only the LSOA codes
-  select("LSOA21CD")
-# there are lots (2280)
-
-#_______________________________________________________________________________
-## ## API to match unmatched LSOAs to BUAs ####
-# 
-# library(httr)
-# library(jsonlite)
-# 
-# # Create an empty dataframe to store results
-# buas_to_add = data.frame(
-#   LSOA21CD = character(),
-#   BUA22CD = character()
-# )
-# # call the findthatpostcode.uk API to match the BUA22CD based on the LSOA
-# # note that my wifi seems to be slow enough to not hit the rate limit...
-# # ...if you do start hitting a rate limit, just use a Sys.sleep(`#secs`) command
-# for(row in 1:nrow(missing_buas)) {
-#   lsoa_code_val = missing_buas[[row, 1]]
-#   url = paste0("https://findthatpostcode.uk/areas/", lsoa_code_val, ".json")
-#   response = GET(url)
-#   
-#   while (response$status_code == 429) {
-#     warning(paste("Rate limit exceeded for LSOA code: ", lsoa_code_val," - waiting 60 secs"))
-#     Sys.sleep(60)  # Wait 60 seconds before continuing
-#     response = GET(url)
-#   }
-#   
-#   json_data = fromJSON(rawToChar(response$content))
-#   
-#   # for some reason, the API will sometimes give an invalid BUA code - E63999999.
-#   # in some cases, it seems to be legitimate (probably, there's no BUA present)
-#   # but in others, the solution seems to be to just keep asking
-#   # and eventually, it will return a correct BUA code!
-#   E63999999_count = 1
-#   max_E63999999_count = 20
-#   
-#   while (json_data[["included"]][["attributes"]][["bua22"]][1] == "E63999999" && E63999999_count <= max_E63999999_count) {
-#     print(paste0("LSOA: ",missing_buas[[row, 1]]," gave E63999999 (invalid code)"))
-#     response = GET(url)
-#     json_data = fromJSON(rawToChar(response$content))
-#     bua22_val = json_data[["included"]][["attributes"]][["bua22"]][1]
-#     E63999999_count = E63999999_count + 1
-#   }
-#   
-#   bua22_val = json_data[["included"]][["attributes"]][["bua22"]][1]
-#   
-#   if (E63999999_count > max_E63999999_count) {
-#     print(paste0("LSOA: ",missing_buas[[row, 1]]," kept giving E63999999 (invalid code) even after ",max_E63999999_count," attempts - assigning it E63999999. Row ",row," complete"))
-#   } else {
-#     print(paste0("LSOA: ",lsoa_code_val," has BUA code: ",bua22_val,". Row ",row," complete"))
-#   }
-#   buas_to_add = buas_to_add %>%
-#     add_row(LSOA21CD = lsoa_code_val, BUA22CD = bua22_val)
-# }
-# 
-# print("Rounds complete!")
-# 
-# # saving backup of API-called dataset
-# write_csv(buas_to_add, "Data/buas_to_add_backup.csv")
-# 
-# # checking for invalid BUA code (E63999999)
-# buas_to_add %>%
-#   filter(BUA22CD == "E63999999") %>%
-#   nrow
-# # 203 LSOAs have invalid corresponding BUA code
-## UNCOMMENT TO HERE IF YOU WANT TO RE-RUN BUA API CALL!!!!!!!!!!!!!!!!!!!!! ##
-
-## COMMENT OUT THE COMMAND BELOW IF YOU WANT TO RE-RUN BUA API CALL!!!!!!!!!!!!!!!!!!!!! ##
-# loading in dataframe with results of API call
-# ie BUA codes for entries previously missing them
-buas_to_add = read_csv("Data/buas_to_add_backup.csv")
-
-rm(missing_buas)
-
-#_______________________________________________________________________________
-## merging BUA API data with other datasets ####
-
-# add these missing BUA codes back into the LSOA-BUA lookup
-# note the BUA names are still missing
-lsoa_bua_eng_lookup_2021_complete = lsoa_bua_eng_lookup_2021_narrow %>%
-  left_join(buas_to_add, by = "LSOA21CD") %>%
-  mutate(BUA22CD = coalesce(BUA22CD.x, BUA22CD.y)) %>%
-  # dropping redundant BUA code columns
-  select(-c("BUA22CD.x","BUA22CD.y"))
-
-rm(lsoa_bua_eng_lookup_2021_narrow)
-
-# checking again for invalid BUA code (E63999999)
-lsoa_bua_eng_lookup_2021_complete %>%
-  filter(BUA22CD == "E63999999") %>%
-  print(n = 10000)
-
-# joining LSOA pop & land use data to LSOA-BUA lookup
-lsoa_bua_eng_pop_01_11_21_land_use = lsoa_eng_pop_01_11_21_nomiss_lad %>%
-  left_join(lsoa_bua_eng_lookup_2021_complete,
-            by = "LSOA21CD") %>%
-  # coalescing repeated columns
-  mutate(LAD22NM = coalesce(LAD22NM.x, LAD22NM.y)) %>%
-  mutate(LAD22CD = coalesce(LAD22CD.x, LAD22CD.y)) %>%
-  # dropping duplicated column names
-  select(-c("lsoa_21_name", 
-            "LAD22NM.x","LAD22NM.y",
-            "LAD22CD.x","LAD22CD.y")) %>%
-  # dropping invalid BUA code (E63999999)
-  filter(BUA22CD != "E63999999")
-
-rm(lsoa_bua_eng_lookup_2021_complete)
-
-# checking to see if anything is missing
-lsoa_bua_eng_pop_01_11_21_land_use %>%
-  filter(is.na(BUA22CD))
-# nothing else missing - good!
-
-# I noticed an error in one of the LSOA to BUA codings
-# rectifying
-lsoa_bua_eng_pop_01_11_21_land_use = lsoa_bua_eng_pop_01_11_21_land_use %>%
-  mutate(
-    BUA22NM = if_else(LSOA21CD == "E01002946", "Kingston upon Thames", BUA22NM),
-    BUA22CD = if_else(LSOA21CD == "E01002946", "E63005164", BUA22CD)
-  )
-
-#_______________________________________________________________________________
-## using LAD permit data to estimate BUA permit data ####
-# Create a mapping table
-lsoa_mapping = lsoa_bua_eng_pop_01_11_21_land_use %>%
-  select(LSOA21CD, LAD22CD, BUA22CD, pop_2001_final) %>%
-  # Ensure we have the BUA code for each LSOA
-  filter(!is.na(BUA22CD))
-
-# calculating proportion of the LAD population living in each BUA
-lad_bua_population = lsoa_mapping %>%
-  # Group by LAD and BUA
-  group_by(LAD22CD, BUA22CD) %>%
-  # Sum population for each LAD-BUA combination
-  summarise(bua_in_lad_population = sum(pop_2001_final, na.rm = TRUE),
-            .groups = "drop") %>%
-  # Calculate total population by LAD
-  group_by(LAD22CD) %>%
-  mutate(lad_total_population = sum(bua_in_lad_population),
-         # Calculate proportion of LAD population in each BUA
-         population_proportion = bua_in_lad_population / lad_total_population) %>%
-  ungroup()
-# checking for any missing rows:
-lad_bua_population %>% filter(if_any(everything(), is.na))
-# nothing - good
-
-# applying population proportions to distribute LAD-level permitting data to BUAs
-bua_permits = lad_bua_population %>%
-  # Join with permitting data (assuming you've matched LAD22CD with LPACD)
-  left_join(perm_rates_summary, by = c("LAD22CD" = "LPACD")) %>%
-  # Calculate BUA-level permits based on population proportion
-  mutate(
-    sum_bua_perms_01_11 = sum_perms_01_11 * population_proportion,
-    sum_bua_perms_01_21 = sum_perms_01_21 * population_proportion
-  )
-
-# Aggregate to get total permits for each BUA (summing across LADs)
-bua_total_permits = bua_permits %>%
-  group_by(BUA22CD) %>%
-  summarise(
-    bua_pop_01 = sum(bua_in_lad_population, na.rm = TRUE),
-    sum_bua_perms_01_11 = sum(sum_bua_perms_01_11, na.rm = TRUE),
-    sum_bua_perms_01_21 = sum(sum_bua_perms_01_21, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-rm(lsoa_eng_pop_01_11_21_nomiss_lad)
-
-#_______________________________________________________________________________
-## final joining incl London ####
-
-# aggregating london BUAs
-# need to aggregate London BUAs
-london_buas = data.frame(
-  BUA22NM = c("City and County of the City of London",
-              "Barking and Dagenham",
-              "Barnet",
-              "Bexley",
-              "Brent",
-              "Bromley",
-              "Camden",
-              "Croydon",
-              "Ealing",
-              "Enfield",
-              "Greenwich",
-              "Hackney",
-              "Hammersmith and Fulham",
-              "Haringey",
-              "Harrow",
-              "Havering",
-              "Hillingdon",
-              "Hounslow",
-              "Islington",
-              "Kensington and Chelsea",
-              "Kingston upon Thames",
-              "Lambeth",
-              "Lewisham",
-              "Merton",
-              "Newham",
-              "Redbridge",
-              "Richmond upon Thames",
-              "Southwark",
-              "Sutton (Sutton)",
-              "Tower Hamlets",
-              "Waltham Forest",
-              "Wandsworth",
-              "City of Westminster"
-  ),
-  
-  BUA22CD = c("E63004906",
-              "E63004859",
-              "E63004747",
-              "E63004992",
-              "E63004844",
-              "E63005189",
-              "E63004858",
-              "E63005267",
-              "E63004894",
-              "E63004679",
-              "E63004986",
-              "E63004850",
-              "E63004944",
-              "E63004793",
-              "E63004781",
-              "E63004796",
-              "E63004882",
-              "E63005014",
-              "E63004860",
-              "E63004950",
-              "E63005164",
-              "E63005063",
-              "E63005035",
-              "E63005121",
-              "E63004881",
-              "E63004790",
-              "E63005073",
-              "E63004965",
-              "E63005250",
-              "E63004898",
-              "E63004797",
-              "E63005033",
-              "E63004916"
-  )
-)
-
-## Aggregating London BUA permit data level ####
-bua_total_permits_lon = bua_total_permits %>%
-  # Replace London BUA codes with a single user-defined code
-  mutate(BUA22CD = ifelse(BUA22CD %in% london_buas$BUA22CD,
-                          "LON999999", 
-                          BUA22CD)) %>%
-  # Group by the modified BUA22CD
-  group_by(BUA22CD) %>%
-  # Create the aggregations
-  summarize(bua_pop_01 = sum(bua_pop_01),
-            sum_bua_perms_01_11 = sum(sum_bua_perms_01_11),
-            sum_bua_perms_01_21 = sum(sum_bua_perms_01_21)) %>%
-  # total permits per initial housing unit (i.e. per initial individual)
-  # "initial" meaning 2001
-  mutate(bua_perm_rate_01_11 = sum_bua_perms_01_11 / bua_pop_01,
-         bua_perm_rate_01_21 = sum_bua_perms_01_21 / bua_pop_01)
-
-## Aggregating up to BUA level ####
-agg_eng_pop_01_11_21_land_use_w_london = lsoa_bua_eng_pop_01_11_21_land_use %>%
-  # Replace London BUA codes with a single user-defined code
-  mutate(BUA22CD = ifelse(BUA22CD %in% london_buas$BUA22CD,
-                          "LON999999", 
-                          BUA22CD)) %>%
-  mutate(BUA22NM = ifelse(BUA22NM %in% london_buas$BUA22NM, 
-                          "Greater London", 
-                          BUA22NM)) %>%
-  # Group by the modified BUA22CD
-  group_by(BUA22CD) %>%
-  # Create the aggregations
-  summarize(
-    # Keep first non-empty BUA22NM
-    BUA22NM = first(na.omit(BUA22NM)),
-    RGN22CD = first(na.omit(RGN22CD)),
-    RGN22NM = first(na.omit(RGN22NM)),
-    bua_01_pop = sum(pop_2001_final),
-    bua_11_pop = sum(pop_2011_final),
-    bua_21_pop = sum(total_lsoa_pop_21),
-    # 1/z_i is fraction of land that's geographically unconstrained
-    # so z_i is 1/(1-fraction of land that's geographically *constrained*)
-    # calculating different values, averaging/summarising land constraints in different ways
-    mean_z_i = 1/(1-(mean(pct_forest_open_land_water) / 100)),
-    median_z_i = 1/(1-(median(pct_forest_open_land_water) / 100)),
-    min_z_i = 1/(1-(min(pct_forest_open_land_water) / 100))
-  )
-
-#_______________________________________________________________________________
-## merging permit data with main dataset ####
-agg_eng_pop_01_11_21_land_use_w_london = agg_eng_pop_01_11_21_land_use_w_london %>%
-  left_join(bua_total_permits_lon,
-            by = "BUA22CD") %>%
-  select(-c("bua_pop_01"))
-
-rm(lsoa_bua_eng_pop_01_11_21_land_use,
-   bua_total_permits_lon,
-   london_buas)
-
-# drop any BUAs that are below your city size threshold (20k)
-agg_pop_01_11_21_ovr_city_threshold = agg_eng_pop_01_11_21_land_use_w_london %>%
-  filter(bua_21_pop >= city_pop_threshold)
-
-rm(agg_eng_pop_01_11_21_land_use_w_london)
-
-# check to see if there are any remaining BUAs with no name
-agg_pop_01_11_21_ovr_city_threshold %>%
-  filter(is.na(BUA22NM))
-# there are none
-
-# rounding population values
-agg_pop_01_11_21_ovr_city_threshold_rounded = agg_pop_01_11_21_ovr_city_threshold %>%
-  mutate(across(c(bua_01_pop, bua_11_pop, bua_21_pop), round)) %>%
-  select(-c("sum_bua_perms_01_11","sum_bua_perms_01_21"))
-
-#_______________________________________________________________________________
-## adding in research labour share values (l_i) ####
-# from p.11 https://www.enterpriseresearch.ac.uk/wp-content/uploads/2021/09/ERC-Insight-The-UK%E2%80%99s-business-RD-workforce-Belt.Ri_.Akinremi.pdf
-agg_pop_01_11_21_ovr_city_threshold_rounded = agg_pop_01_11_21_ovr_city_threshold_rounded %>%
-  mutate(l_i = case_when(
-    RGN22NM == "North East" ~ 0.0052,
-    RGN22NM == "North West" ~ 0.0060,
-    RGN22NM == "Yorkshire and The Humber" ~ 0.0056,
-    RGN22NM == "East Midlands" ~ 0.0088,
-    RGN22NM == "West Midlands" ~ 0.0097,
-    RGN22NM == "East of England" ~ 0.0143,
-    RGN22NM == "London" ~ 0.0069,
-    RGN22NM == "South East" ~ 0.013,
-    RGN22NM == "South West" ~ 0.0083
-  ))
-
-rm(agg_pop_01_11_21_ovr_city_threshold,
-   perm_rates_summary,
-   valid_lad_codes,
-   filtered_out_lpacd,
-   lpacd_noimp_miss_val,
-   any_duplicates,
-   missing_data_check,
-   lsoa_mapping,
-   lsoa_eng_pop_01_11_21_imputed_w_land_use,
-   lsoas_w_missing_lad,
-   lads_in_lsoa_data,
-   lads_to_add,
-   lad_prefix_counts,
-   lad_bua_population,
-   buas_to_add,
-   bua_total_permits,
-   bua_permits,
-   aggregated_row)
-
-#_______________________________________________________________________________
-# testing the original DP model on data ####
-
-# total population of England
-# https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/timeseries/enpop/pop
-tot_01_pop = 49449700
-tot_21_pop = 56554900
-
-# urban population based on aggregated BUA dataset
-urb_01_pop = sum(agg_pop_01_11_21_ovr_city_threshold_rounded$bua_01_pop)
-urb_21_pop = sum(agg_pop_01_11_21_ovr_city_threshold_rounded$bua_21_pop)
-
-# rural pop is difference between total and urban pop
-rur_01_pop = tot_01_pop - urb_01_pop
-rur_21_pop = tot_21_pop - urb_21_pop
-
-# removing irrelevant geographic constraint variables
-geographic_constraint_list_for_removal = geographic_constraint_potential_list[geographic_constraint_potential_list != geographic_constraint]
-agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints = agg_pop_01_11_21_ovr_city_threshold_rounded %>%
-  select(-all_of(geographic_constraint_list_for_removal)) %>%
-  # arranging by descending order of 2021 population
-  arrange(desc(bua_21_pop))
-
-# intermediate save
-write_csv(agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints,
-          "Data/agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints.csv")
-
-#_______________________________________________________________________________
-# intermediate save - can run from here ####
-agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints = read_csv("Data/agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints.csv")
-
-rm(
-  counterfactual_results_tibble,
-  agg_pop_01_11_21_ovr_city_threshold_rounded
-)
-
 #_______________________________________________________________________________
 # counterfactual & evaluation ####
 # _________________________ ####
