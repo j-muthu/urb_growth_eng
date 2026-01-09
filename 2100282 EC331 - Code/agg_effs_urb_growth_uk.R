@@ -418,14 +418,12 @@ perm_rates_data = perm_rates_raw %>%
   group_by(LPACD, LPANM, year) %>%
   summarise(total_dwellings = sum(major_dwellings, na.rm = TRUE) + sum(minor_dwellings, na.rm = TRUE),
             .groups = 'drop') %>%
+  # up to and including 2021
+  filter(year <= 2021) %>%
   # Pivot wider to get years as columns
   pivot_wider(names_from = year,
               values_from = total_dwellings,
-              names_prefix = "total_maj_and_min_dwellings_") %>%
-  # up to and including 2021
-  select(-c("total_maj_and_min_dwellings_2022",
-            "total_maj_and_min_dwellings_2023",
-            "total_maj_and_min_dwellings_2024"))
+              names_prefix = "total_maj_and_min_dwellings_")
 
 #_______________________________________________________________________________
 ## imputing missing permitting data using linear regression ####
@@ -1043,17 +1041,14 @@ rm(agg_pop_01_11_21_ovr_city_threshold,
 # total population of England
 # https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/timeseries/enpop/pop
 tot_01_pop = 49449700
-tot_11_pop = 53107200
 tot_21_pop = 56554900
 
 # urban population based on aggregated BUA dataset
 urb_01_pop = sum(agg_pop_01_11_21_ovr_city_threshold_rounded$bua_01_pop)
-urb_11_pop = sum(agg_pop_01_11_21_ovr_city_threshold_rounded$bua_11_pop)
 urb_21_pop = sum(agg_pop_01_11_21_ovr_city_threshold_rounded$bua_21_pop)
 
 # rural pop is difference between total and urban pop
 rur_01_pop = tot_01_pop - urb_01_pop
-rur_11_pop = tot_11_pop - urb_11_pop
 rur_21_pop = tot_21_pop - urb_21_pop
 
 # removing irrelevant geographic constraint variables
@@ -1102,7 +1097,6 @@ data_for_cf_fn = function(
     mutate(eq_rho_A_h_coeff_on_tau = eq_rho_A_h_coeff_on_tau * ((geographic_constraint)^(gamma_f)/(1-l_i))) %>%
     # now calculating for each year
     mutate(eq_rho_A_h_coeff_on_tau_01 = eq_rho_A_h_coeff_on_tau * (bua_01_pop)^(gamma_f + theta_f - sigma_f - beta_f)) %>%
-    mutate(eq_rho_A_h_coeff_on_tau_11 = eq_rho_A_h_coeff_on_tau * (bua_11_pop)^(gamma_f + theta_f - sigma_f - beta_f)) %>%
     mutate(eq_rho_A_h_coeff_on_tau_21 = eq_rho_A_h_coeff_on_tau * (bua_21_pop)^(gamma_f + theta_f - sigma_f - beta_f)) %>%
     # dropping irrelevant var
     select(-eq_rho_A_h_coeff_on_tau)
@@ -1111,7 +1105,6 @@ data_for_cf_fn = function(
   replication = replication %>%
     # calculating for each year - multiplying by (1-l_i)
     mutate(income01_div_tau = eq_rho_A_h_coeff_on_tau_01 * (1-l_i) * (bua_01_pop)^(sigma_f + beta_f) ) %>%
-    mutate(income11_div_tau = eq_rho_A_h_coeff_on_tau_11 * (1-l_i) * (bua_11_pop)^(sigma_f + beta_f) ) %>%
     mutate(income21_div_tau = eq_rho_A_h_coeff_on_tau_21 * (1-l_i) * (bua_21_pop)^(sigma_f + beta_f) )
   
   # finding consumption c_{it} / τ_t (eqn 22 / τ_t) - same value for old and new model
@@ -1120,7 +1113,6 @@ data_for_cf_fn = function(
     mutate(cons_coeff_on_tau = cons_coeff_on_tau * (geographic_constraint)^(gamma_f) ) %>%
     # now calculating for each year
     mutate(cons_coeff_on_tau_01 = cons_coeff_on_tau * (bua_01_pop)^(gamma_f + theta_f)) %>%
-    mutate(cons_coeff_on_tau_11 = cons_coeff_on_tau * (bua_11_pop)^(gamma_f + theta_f)) %>%
     mutate(cons_coeff_on_tau_21 = cons_coeff_on_tau * (bua_21_pop)^(gamma_f + theta_f)) %>%
     # removing irrelevant variable
     select(-cons_coeff_on_tau)
@@ -1139,17 +1131,13 @@ data_for_cf_fn = function(
   # https://www.ons.gov.uk/economy/grossdomesticproductgdp/datasets/regionalgrossdomesticproductallnutslevelregions
   # regionalgrossdomesticproductgdpbyallinternationalterritoriallevelitlregions - Copy.xlsx
   rgdp01_cvm <<- 30316
-  rgdp11_cvm <<- 33428
   rgdp21_cvm <<- 36465
   
   # gdp per capita factor increase
-  rgdp_multiple_01_to_11 <<- rgdp11_cvm/rgdp01_cvm
-  rgdp_multiple_01_to_11
-  # 1.102652
   rgdp_multiple_01_to_21 <<- rgdp21_cvm/rgdp01_cvm
   rgdp_multiple_01_to_21
   # 1.20283
-  # both much lower than US per capita growth 1980-2010:  1.658
+  # much lower than US per capita growth 1980-2010:  1.658
   
   # normalise tau01_uk to 1
   tau_01_uk <<- 1
@@ -1161,51 +1149,42 @@ data_for_cf_fn = function(
   # τ_t (sum (total income in each city + rural areas div τ_t)_t / total pop_t)
   # summed variables
   sum_tot_income01_div_tau = sum(replication$income01_div_tau * replication$bua_01_pop)
-  sum_tot_income11_div_tau = sum(replication$income11_div_tau * replication$bua_11_pop)
   sum_tot_income21_div_tau = sum(replication$income21_div_tau * replication$bua_21_pop)
   sum_income_pc_01_div_tau = sum_tot_income01_div_tau / urb_01_pop
-  sum_income_pc_11_div_tau = sum_tot_income11_div_tau / urb_11_pop
   sum_income_pc_21_div_tau = sum_tot_income21_div_tau / urb_21_pop
   
   # imputed value of tau
   # note this imputation is the same in both the og and new methodology
-  tau_11_uk <<- rgdp_multiple_01_to_11 / (sum_income_pc_11_div_tau / sum_income_pc_01_div_tau)
-  # 1.083876 with DP's param values
   tau_21_uk <<- rgdp_multiple_01_to_21 / (sum_income_pc_21_div_tau / sum_income_pc_01_div_tau)
   # 1.175209 with DP's param values
-  # both much lower than the 1.596 US value over 1980-2010 
+  # much lower than the 1.596 US value over 1980-2010 
   
   #_______________________________________________________________________________
   ## calculating consumption, income values ####
   consumption_income = replication %>%
     # values for equation 21 (rho, A, h)
     mutate(rho_A_h_01 = eq_rho_A_h_coeff_on_tau_01 * tau_01_uk) %>%
-    mutate(rho_A_h_11 = eq_rho_A_h_coeff_on_tau_11 * tau_11_uk) %>%
     mutate(rho_A_h_21 = eq_rho_A_h_coeff_on_tau_21 * tau_21_uk) %>%
     # dropping old columns that were coefficients on tau
     select(-starts_with("eq_rho_A_h_coeff_on_tau")) %>%
     # values for equation 8 - y_{it}
     mutate(y_01 = income01_div_tau * tau_01_uk) %>%
-    mutate(y_11 = income11_div_tau * tau_11_uk) %>%
     mutate(y_21 = income21_div_tau * tau_21_uk) %>%
     # dropping old columns that were coefficients on tau
     select(-ends_with("_div_tau")) %>%
     # values for equation 22 - c_{it}
     mutate(c_01 = cons_coeff_on_tau_01 * tau_01_uk) %>%
-    mutate(c_11 = cons_coeff_on_tau_11 * tau_11_uk) %>%
     mutate(c_21 = cons_coeff_on_tau_21 * tau_21_uk) %>%
     # dropping old columns that were coefficients on tau
     select(-starts_with("cons_coeff_on_tau")) %>%
     
     # calculating growth rate of income over that period
-    mutate(y_11_ovr_y_01 = y_11 / y_01) %>%
     mutate(y_21_ovr_y_01 = y_21 / y_01)
   
   # generating variables for consumption as share of income
   c_ovr_y_data = consumption_income %>%
     mutate(
       c_ovr_y_01 = c_01 / y_01,
-      c_ovr_y_11 = c_11 / y_11,
       c_ovr_y_21 = c_21 / y_21
     )
   assign("c_ovr_y_data", c_ovr_y_data, envir = .GlobalEnv)
@@ -1213,16 +1192,12 @@ data_for_cf_fn = function(
   summed_c_y_vars = consumption_income %>%  
     summarise(
       c_all_cities_01 = sum(c_01),
-      c_all_cities_11 = sum(c_11),
       c_all_cities_21 = sum(c_21),
       y_all_cities_01 = sum(y_01),
-      y_all_cities_11 = sum(y_11),
       y_all_cities_21 = sum(y_21)
     )
   c_ovr_y_01 <<- summed_c_y_vars$c_all_cities_01 / summed_c_y_vars$y_all_cities_01
   print(paste0("c_ovr_y_01: ", c_ovr_y_01))
-  c_ovr_y_11 <<- summed_c_y_vars$c_all_cities_11 / summed_c_y_vars$y_all_cities_11
-  print(paste0("c_ovr_y_11: ", c_ovr_y_11))
   c_ovr_y_21 <<- summed_c_y_vars$c_all_cities_21 / summed_c_y_vars$y_all_cities_21
   print(paste0("c_ovr_y_21: ", c_ovr_y_21))
   
@@ -1231,19 +1206,16 @@ data_for_cf_fn = function(
   # for marginal city, c_{it} = c_{rt} = y_{rt}
   # so c_{rt} / y_{rt} = 1 for all t
   rur_01_income <<- min(consumption_income$c_01)
-  rur_11_income <<- min(consumption_income$c_11)
   rur_21_income <<- min(consumption_income$c_21)
   
   # calculating permitting costs and ordering by 2001 population
   consumption_income_w_permitting_ordered = consumption_income %>%
     mutate(perm_01 = c_01 - rur_01_income) %>%
-    mutate(perm_11 = c_11 - rur_11_income) %>%
     mutate(perm_21 = c_21 - rur_21_income) %>%
     # sorting by largest 2001 population first
     arrange(desc(bua_01_pop)) %>%
     # now generating variables permitting costs as share of income
     mutate(perm_ovr_y_01 = perm_01 / y_01) %>%
-    mutate(perm_ovr_y_11 = perm_11 / y_11) %>%
     mutate(perm_ovr_y_21 = perm_21 / y_21)
   
   # creating another version of dataset with only 2001 and 2021 values
@@ -1253,7 +1225,6 @@ data_for_cf_fn = function(
   # rural productivity
   # rearranging equation 40 <=> eqn 11
   rur_01_prod <<- rur_01_income / ((rur_01_pop)^(-lambda_f))
-  rur_11_prod <<- rur_11_income / ((rur_11_pop)^(-lambda_f))
   rur_21_prod <<- rur_21_income / ((rur_21_pop)^(-lambda_f))
   
   start_counterfactual_data <<- consumption_income_w_permitting_01_21_only %>%
@@ -1295,7 +1266,7 @@ counterfactual_function = function(
   cfact_fct_results_list = list()
   
   # Calculate the 75th percentile of bua_perm_rate_01_21 if needed
-  percentile_75th_perm_rate = quantile(counterfactual_dataset$bua_perm_rate_01_21, 0.75)
+  percentile_75th_perm_rate = quantile(counterfactual_dataset$bua_perm_rate_01_21, 0.98)
   
   # Define factors to process
   if (factor_change) {
@@ -1993,7 +1964,7 @@ top_10_buas = dp_original_params_counterfactual_data %>%
   slice_head(n = 10)
 
 perm_rate_vs_city_pop = ggplot(dp_original_params_counterfactual_data, 
-                aes(x = bua_21_pop, y = 1/bua_perm_rate_01_21)) +
+                               aes(x = bua_21_pop, y = 1/bua_perm_rate_01_21)) +
   geom_point(alpha = 0.5) +
   geom_smooth(method = "lm", color = "blue", se = F) +
   geom_text_repel(
@@ -2013,7 +1984,7 @@ perm_rate_vs_city_pop = ggplot(dp_original_params_counterfactual_data,
   scale_x_log10()
 
 geog_constr_vs_perm_rate = ggplot(dp_original_params_counterfactual_data, 
-                aes(x = 1 - 1/geographic_constraint, y = 1/bua_perm_rate_01_21)) +
+                                  aes(x = 1 - 1/geographic_constraint, y = 1/bua_perm_rate_01_21)) +
   geom_point(alpha = 0.5) +
   geom_smooth(method = "lm", color = "blue", se = F) +
   geom_text_repel(
