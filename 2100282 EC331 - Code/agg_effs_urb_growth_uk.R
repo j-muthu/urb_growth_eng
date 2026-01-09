@@ -1,2071 +1,1052 @@
-#_______________________________________________________________________________
-# initialisation ####
+#===============================================================================
+# DURANTON & PUGA (2023) - UK APPLICATION
+# Refactored version with:
+#   - Constants defined at top
+#   - Chained data transformations
+#   - Minimal global assignment
+#   - Modular counterfactual functions
+#===============================================================================
 
-# clean all
 rm(list = ls())
 
-packages = c("readr", "tidyverse", "httr", "jsonlite", "readxl", "ggrepel", "stargazer")
+#_______________________________________________________________________________
+# PACKAGES ####
+#_______________________________________________________________________________
 
-# Installing packages
+packages <- c("readr", "tidyverse", "httr", "jsonlite", "readxl", "ggrepel", "stargazer")
+
 install_if_missing <- function(pkg) {
+  
   if (!requireNamespace(pkg, quietly = TRUE)) {
     message(paste("Installing package:", pkg))
     install.packages(pkg)
-  } else {
-    message(paste("Package already installed:", pkg))
   }
   library(pkg, character.only = TRUE)
 }
 invisible(lapply(packages, install_if_missing))
 
 #_______________________________________________________________________________
-# SKIP DATA CONSTRUCTION? ####
-# Set to TRUE if you've already run the data cleaning pipeline and want to skip to counterfactuals
-# Set to FALSE to run the full pipeline from scratch
+# CONSTANTS ####
+#_______________________________________________________________________________
+
+# Control flow
 SKIP_DATA_CONSTRUCTION <- FALSE
 
-## US parameter values ####
+# US parameter values (from DP 2023, Table I p.2238 and Table II p.2242)
+# gamma: elasticity of commuting cost w.r.t. distance
+# theta: (negative) elasticity of travel speed w.r.t. city population  
+# sigma: short-term agglomeration elasticity
+# beta: learning/experience agglomeration elasticity
+# lambda: land share in rural production (Valentinyi & Herrendorf 2008)
+PARAMS_USA <- list(
+  tau_1980 = 1,
+  tau_2010 = 1.569,
+  gamma = 0.07,
+  theta = 0.04,
+  sigma = 0.04,
+  beta = 0.04,
+  lambda = 0.18
+)
 
-tau_1980_usa = 1 # numeraire
-tau_2010_usa = 1.569 
-# see "C:\Users\joshu\OneDrive - University of Warwick\EC331\non-final work\urb growth appendices.pdf"
-# for calculation - calculate this for the UK
+# City population threshold for "medium" BUA
+# Source: ONS Census 2021 BUA definitions
+CITY_POP_THRESHOLD <- 20000
 
-gamma_usa = 0.07
-theta_usa = 0.04
-sigma_usa = 0.04
-beta_usa = 0.04
-lambda_usa = 0.18
+# Geographic constraint variable choice
+GEOGRAPHIC_CONSTRAINT_OPTIONS <- c("mean_z_i", "median_z_i", "min_z_i")
+GEOGRAPHIC_CONSTRAINT_VAR <- "mean_z_i"
 
-# defining city population threshold (only keep BUAs above this)
-# https://www.ons.gov.uk/peoplepopulationandcommunity/housing/articles/townsandcitiescharacteristicsofbuiltupareasenglandandwales/census2021
-# ^defines BUAs w pop over 20,000 as "medium" - keep those
-city_pop_threshold = 20000
+# England population totals
+# Source: ONS mid-year estimates
+# https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/timeseries/enpop/pop
+POP_ENGLAND <- list(
+  y2001 = 49449700,
+  y2021 = 56554900
+)
 
-# deciding on geographic constraint variable
-geographic_constraint_potential_list = c("mean_z_i","median_z_i","min_z_i")
-geographic_constraint = "mean_z_i"
+# Population growth factors for imputation
+# Source: Data/eng_wales_pop_over_time.xlsx
+# https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/datasets/populationestimatesforukenglandandwalesscotlandandnorthernireland
+POP_GROWTH_FACTORS <- list(
+  ew_2001_to_2011 = 1.07396242237523,
+  ew_2001_to_2011_alt = 1.07278362492818,  # slightly different calc for some imputes
+  ew_2011_to_2021 = 1.06492008640114,
+  ew_2001_to_2021 = 1.14368415562741
+)
+
+# UK real GDP per capita (CVM, 2012 prices)
+# Source: ONS regional GDP
+RGDP_PER_CAPITA <- list(
+  y2001 = 30316,
+  y2021 = 36465
+)
+
+# Data file parameters
+PERM_DATA_START_ROW <- 33128  # row where 2001 data begins in PS2 file
+PERM_DATA_END_YEAR <- 2021
+
+# Counterfactual parameters
+PERCENTILE_FOR_PERM_RATE <- 0.98
+
+# Permitting rate change factors for sensitivity analysis
+PERM_RATE_CHANGE_FACTORS <- c(0.05, 0.1, 0.25, 0.3, 0.5)
+
+# R&D employment shares by region
+# Source: ERC Insight report p.11
+# https://www.enterpriseresearch.ac.uk/wp-content/uploads/2021/09/ERC-Insight-The-UK%E2%80%99s-business-RD-workforce-Belt.Ri_.Akinremi.pdf
+RD_LABOUR_SHARES <- list(
+  "North East" = 0.0052,
+  "North West" = 0.0060,
+  "Yorkshire and The Humber" = 0.0056,
+  "East Midlands" = 0.0088,
+  "West Midlands" = 0.0097,
+  "East of England" = 0.0143,
+  "London" = 0.0069,
+  "South East" = 0.013,
+  "South West" = 0.0083
+)
+
+# London BUA codes for aggregation
+LONDON_BUAS <- tibble(
+  BUA22NM = c(
+    "City and County of the City of London", "Barking and Dagenham", "Barnet",
+    "Bexley", "Brent", "Bromley", "Camden", "Croydon", "Ealing", "Enfield",
+    "Greenwich", "Hackney", "Hammersmith and Fulham", "Haringey", "Harrow",
+    "Havering", "Hillingdon", "Hounslow", "Islington", "Kensington and Chelsea",
+    "Kingston upon Thames", "Lambeth", "Lewisham", "Merton", "Newham",
+    "Redbridge", "Richmond upon Thames", "Southwark", "Sutton (Sutton)",
+    "Tower Hamlets", "Waltham Forest", "Wandsworth", "City of Westminster"
+  ),
+  BUA22CD = c(
+    "E63004906", "E63004859", "E63004747", "E63004992", "E63004844",
+    "E63005189", "E63004858", "E63005267", "E63004894", "E63004679",
+    "E63004986", "E63004850", "E63004944", "E63004793", "E63004781",
+    "E63004796", "E63004882", "E63005014", "E63004860", "E63004950",
+    "E63005164", "E63005063", "E63005035", "E63005121", "E63004881",
+    "E63004790", "E63005073", "E63004965", "E63005250", "E63004898",
+    "E63004797", "E63005033", "E63004916"
+  )
+)
+
+# Bordering LADs for imputation of missing permit data
+BORDERING_LADS <- list(
+  E06000061 = c("E06000017", "E07000141", "E06000031", "E07000011", 
+                "E06000055", "E06000042", "E06000062", "E07000131"),
+  E06000062 = c("E07000131", "E06000061", "E06000042", "E06000060",
+                "E07000177", "E07000221", "E07000220")
+)
+
+# Alternative parameter combinations for robustness (from DP Table IV)
+ALT_PARAMS <- tibble(
+  sigma = c(0.02, 0.03, 0.04, 0.02, 0.03, 0.02, 0.03, 0.04),
+  beta  = c(0.02, 0.03, 0.04, 0.02, 0.03, 0.02, 0.03, 0.04),
+  gamma = c(0.06, 0.06, 0.06, 0.07, 0.07, 0.08, 0.08, 0.08),
+  theta = c(0.03, 0.03, 0.03, 0.04, 0.04, 0.05, 0.05, 0.05)
+)
+
+
+#_______________________________________________________________________________
+# DATA CONSTRUCTION ####
+#_______________________________________________________________________________
 
 if (SKIP_DATA_CONSTRUCTION) {
-  # load the saved intermediate dataset
-  agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints <- read_csv(
-    "Data/agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints.csv"
-  )
   
-  # also need these for the counterfactual
-  tot_01_pop <- 49449700
-  tot_21_pop <- 56554900
-  urb_01_pop <- sum(agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints$bua_01_pop)
-  urb_21_pop <- sum(agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints$bua_21_pop)
-  rur_01_pop <- tot_01_pop - urb_01_pop
-  rur_21_pop <- tot_21_pop - urb_21_pop
+  message("Loading pre-existing data, skipping construction...")
   
-  message("Data loaded. Skipping to counterfactual section.")
+  city_data <- read_csv("Data/agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints.csv")
+  
+  # Compute derived population values
+  urb_01_pop <- sum(city_data$bua_01_pop)
+  urb_21_pop <- sum(city_data$bua_21_pop)
+  rur_01_pop <- POP_ENGLAND$y2001 - urb_01_pop
+  rur_21_pop <- POP_ENGLAND$y2021 - urb_21_pop
   
 } else {
+  
   message("Running full data construction pipeline...")
-  #_______________________________________________________________________________
-  # data cleaning ####
   
-  #_______________________________________________________________________________
-  ## Importing data ####
+  #-----------------------------------------------------------------------------
+  # Import raw data
+  #-----------------------------------------------------------------------------
   
-  # import 2022 land use data (using 2021 LSOA boundaries)
-  # https://www.gov.uk/government/statistics/land-use-in-england-2022
-  lsoa_land_use_2022_raw = read_csv("Data/lsoa_land_use_2022.csv")
+  lsoa_land_use_2022_raw <- read_csv("Data/lsoa_land_use_2022.csv")
+  lsoa_pop_2001_raw <- read_csv("Data/lsoa_pop_2001.csv")
+  lsoa_pop_2011_raw <- read_csv("Data/lsoa_pop_2011.csv")
+  lsoa_pop_2021_raw <- read_csv("Data/lsoa_pop_2021.csv")
+  lsoa_lookup_2001_to_2011_raw <- read_csv("Data/LSOA_(2001)_to_LSOA_(2011)_to_LAD_(2011)_Lookup_in_England_and_Wales.csv")
+  lsoa_lookup_2011_to_2021_raw <- read_csv("Data/LSOA_(2011)_to_LSOA_(2021)_to_LAD_(2022)_Best_Fit_Lookup_for_EW_(V2).csv")
+  lsoa_bua_lookup_2021_raw <- read_csv("Data/LSOA_(2021)_to_Built_Up_Area_to_Local_Authority_District_to_Region_(December_2022)_Lookup_in_England_and_Wales_v2.csv")
   
-  # import LSOA pop data for 2001, 2011, 2021
-  # https://www.nomisweb.co.uk/query/construct/summary.asp?mode=construct&version=0&dataset=1634
-  # https://www.nomisweb.co.uk/query/construct/summary.asp?mode=construct&version=0&dataset=144
-  # https://www.nomisweb.co.uk/query/construct/summary.asp?mode=construct&version=0&dataset=2021
-  for (censusyr in c(2001,2011,2021)) {
-    assign(paste0("lsoa_pop_",censusyr,"_raw"), read_csv(paste0("Data/lsoa_pop_",censusyr,".csv")))
-  }
-  rm(censusyr)
+  perm_rates_raw <- read_csv("Data/PS2_data_-_open_data_table__202409_.csv", skip = 2) %>%
+    select(2:4, 34, 112) %>%
+    slice(PERM_DATA_START_ROW:n())
   
-  # import inter-year LSOA lookups
-  # https://www.data.gov.uk/dataset/4048a518-3eaf-457a-905c-9e04f4fffca8/lsoa-2001-to-lsoa-2011-to-lad-december-2011-best-fit-lookup-in-ew1
-  lsoa_lookup_2001_to_2011_raw = read_csv("Data/LSOA_(2001)_to_LSOA_(2011)_to_LAD_(2011)_Lookup_in_England_and_Wales.csv")
-  # https://geoportal.statistics.gov.uk/datasets/ons::lsoa-2011-to-lsoa-2021-to-local-authority-district-2022-best-fit-lookup-for-ew-v2/about
-  lsoa_lookup_2011_to_2021_raw = read_csv("Data/LSOA_(2011)_to_LSOA_(2021)_to_LAD_(2022)_Best_Fit_Lookup_for_EW_(V2).csv")
+  #-----------------------------------------------------------------------------
+  # 2001-2011 LSOA merging (chained)
+  #-----------------------------------------------------------------------------
   
-  # import 2021 LSOA to BUA lookup
-  # https://geoportal.statistics.gov.uk/datasets/ons::lsoa-2021-to-bua-to-lad-to-region-december-2022-best-fit-lookup-in-ew-v2/about
-  lsoa_bua_lookup_2021_raw = read_csv("Data/LSOA_(2021)_to_Built_Up_Area_to_Local_Authority_District_to_Region_(December_2022)_Lookup_in_England_and_Wales_v2.csv")
-  
-  # LAD permitting data
-  # https://assets.publishing.service.gov.uk/media/67d2ac07886e7770c211e042/PS2_data_-_open_data_table__202412_.csv/preview
-  perm_rates_raw = read_csv("Data/PS2_data_-_open_data_table__202409_.csv",
-                            skip = 2) %>%  # Skip first 2 rows so row 3 becomes headers
-    select(2:4,34,112) %>%
-    slice((33128):n())  # Filter rows from 33128 (start of 2001 data)
-  
-  #_______________________________________________________________________________
-  ## 2001-2011 merging ####
-  
-  # for 2001 LSOAs, find equivalent 2011 LSOAs
-  lsoa_pop_2001_to_2011 = lsoa_pop_2001_raw %>%
-    full_join(lsoa_lookup_2001_to_2011_raw, 
-              by = c("lsoa_2001_code" = "LSOA01CD")) %>%
-    select(2:7)
-  
-  rm(lsoa_pop_2001_raw,
-     lsoa_lookup_2001_to_2011_raw)
-  
-  # check if there are any missing values in the 2001-2011 linked dataset
-  lsoa_pop_2001_to_2011 %>%
-    filter(if_any(everything(), is.na))
-  
-  # https://geoportal.statistics.gov.uk/datasets/ons::lsoa-2001-to-lsoa-2011-to-lad-december-2011-best-fit-lookup-in-ew/about
-  # U means unchanged, so no problems there
-  # M means merged, so for any 2001 LSOAs that merge into 2011 LSOAs, add their 2001 pops together
-  # X means irregular relationship. For any 2001 LSOAs 
-  
-  # Create a subset of rows where LSOA11CD appears more than once
-  # AND at least one of those rows has "X" in CHGIND
-  lsoa_pop_2001_to_2011 %>%
-    # Group by LSOA11CD to check for duplicates
+  # Join 2001 pop to 2011 LSOAs, handling merges/splits
+  lsoa_pops_2001_2011 <- lsoa_pop_2001_raw %>%
+    full_join(lsoa_lookup_2001_to_2011_raw, by = c("lsoa_2001_code" = "LSOA01CD")) %>%
+    select(2:7) %>%
+    # Aggregate any 2001 LSOAs that merged into single 2011 LSOAs
     group_by(LSOA11CD) %>%
-    # Filter groups that have duplicates AND at least one "X"
-    filter(n() > 1 & any(CHGIND == "X")) %>%
-    # Remove the grouping to get back to regular dataframe
-    ungroup()
-  # there are no 2011 LSOAs that are a mix of both X and not X (i.e. they are only changed irregularly).
-  
-  # for U, M, X, we merge any 2001 LSOA pops that got merged under the 2011 LSOAs
-  # if they didn't get merged, the 2001 LSOA pops correspond to the 2011 LSOAs
-  lsoa_pop_2001_to_2011_merged = lsoa_pop_2001_to_2011 %>%
-    group_by(LSOA11CD) %>%
-    summarize(pop_2001_lsoa_2011_nosplit = sum(usual_resident_pop_2001),
-              LSOA11CD = first(LSOA11CD),
-              LSOA11NM = first(LSOA11NM),
-              CHGIND = first(CHGIND)
-    )
-  
-  rm(lsoa_pop_2001_to_2011)
-  
-  # checking the LSOAs that got split (922 rows)
-  lsoa_pop_2001_to_2011_merged %>%
-    filter(CHGIND == "S")
-  
-  # merging with 2011 LSOA pop data
-  lsoa_pops_2001_and_2011_split_01_pop = lsoa_pop_2001_to_2011_merged %>%
-    left_join(lsoa_pop_2011_raw, by = c("LSOA11CD"="lsoa_code_2011")) %>%
-    # drop column that repeats 2011 LSOA names
-    select(-"lsoa_name_2011")
-  
-  rm(lsoa_pop_2001_to_2011_merged)
-  
-  # the split LSOA 2001 population values will need to be imputed 
-  # do this by taking the 2011 pop values and decreasing them... 
-  # ...by the relative population change of E&W between 2001-2011
-  # England's pop grew by factor of 1.07396242237523 between 2001-2011
-  # see "Data/eng_wales_pop_over_time.xlsx"
-  # https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/datasets/populationestimatesforukenglandandwalesscotlandandnorthernireland
-  lsoa_pops_2001_and_2011 = lsoa_pops_2001_and_2011_split_01_pop %>%
-    mutate(pop_2001_imputed_split = ifelse(CHGIND == "S",
-                                           usual_resident_pop_2011 / 1.07396242237523, 
-                                           pop_2001_lsoa_2011_nosplit
-    ))
-  
-  rm(lsoa_pops_2001_and_2011_split_01_pop)
-  
-  # checking rows where 2001 LSOAs were split
-  lsoa_pops_2001_and_2011 %>%
-    filter(CHGIND == "S")
-  
-  # dropping non-imputed 2001 pop column
-  lsoa_pops_2001_and_2011_imputed_only = lsoa_pops_2001_and_2011 %>%
-    select(-"pop_2001_lsoa_2011_nosplit")
-  
-  rm(lsoa_pops_2001_and_2011)
-  
-  # checking for any duplicate 2011 LSOAs (there are none - good!)
-  lsoa_pops_2001_and_2011_imputed_only %>%
-    group_by(LSOA11CD) %>%
-    filter(n() > 1) %>%
-    ungroup()
-  
-  # the 2011 LSOA raw pop file has 4 more observations than the merged file
-  # and the original 2001-2011 LSOA lookup file
-  # finding those missing observations
-  diff_11_raw_pop_and_merged_df = lsoa_pop_2011_raw %>%
-    anti_join(lsoa_pops_2001_and_2011_imputed_only,
-              by = c("lsoa_code_2011" = "LSOA11CD")) %>%
-    print()
-  
-  rm(lsoa_pop_2011_raw)
-  
-  # create a dataframe of these missing observations to add manually to the merged file
-  diff_11_raw_pop_and_merged_df_for_joining = data.frame(
-    LSOA11CD = diff_11_raw_pop_and_merged_df$lsoa_code_2011,
-    LSOA11NM = diff_11_raw_pop_and_merged_df$lsoa_name_2011,
-    # create new change indicator "N" for "newly joined" for all of these entries
-    CHGIND = rep("N", times = nrow(diff_11_raw_pop_and_merged_df)),
-    usual_resident_pop_2011 = diff_11_raw_pop_and_merged_df$usual_resident_pop_2011,
-    # and imputing 2001 pop in same way as above (using E&W pop growth rate)
-    pop_2001_imputed_split = diff_11_raw_pop_and_merged_df$usual_resident_pop_2011 / 1.07278362492818
-  )
-  
-  # adding missing observations to merged file
-  lsoa_pops_2001_and_2011_imputed_only_plus_miss = lsoa_pops_2001_and_2011_imputed_only %>%
-    bind_rows(diff_11_raw_pop_and_merged_df_for_joining)
-  
-  rm(lsoa_pops_2001_and_2011_imputed_only,
-     diff_11_raw_pop_and_merged_df,
-     diff_11_raw_pop_and_merged_df_for_joining)
-  
-  #_______________________________________________________________________________
-  ## 2011 to 2021 merging ####
-  
-  # 2011 to 2021 LSOA lookup
-  # keeping only relevant cols
-  # 2011 LSOA, 2021 LSOA, 2022 LAD
-  lsoa_lookup_2011_to_2021_narrow = lsoa_lookup_2011_to_2021_raw %>%
-    select(2:7)
-  
-  rm(lsoa_lookup_2011_to_2021_raw)
-  
-  # check for rows where multiple 2011 LSOAs are merged into 2021 LSOAs
-  lsoa_lookup_2011_to_2021_narrow %>%
-    group_by(LSOA21CD) %>%
-    filter(n() > 1)
-  
-  # joining 2001&2011 pop data in 2011 LSOAs to 2011-2021 LSOA lookup
-  lsoa_pop_01_11_merged_w_21_lsoa = lsoa_pops_2001_and_2011_imputed_only_plus_miss %>%
-    full_join(lsoa_lookup_2011_to_2021_narrow,
-              by = "LSOA11CD")
-  
-  rm(lsoa_pops_2001_and_2011_imputed_only_plus_miss,
-     lsoa_lookup_2011_to_2021_narrow)
-  
-  # aggregating pop values by 2021 LSOAs
-  lsoa_agg_pop_01_11_merged_w_21_lsoa = lsoa_pop_01_11_merged_w_21_lsoa %>%
-    group_by(LSOA21CD) %>%
-    summarize(pop_2011_final = sum(usual_resident_pop_2011),
-              pop_2001_final = sum(pop_2001_imputed_split),
-              LSOA21NM = first(LSOA21NM),
-              LAD22CD = first(LAD22CD),
-              LAD22NM = first(LAD22NM))
-  
-  rm(lsoa_pop_01_11_merged_w_21_lsoa)
-  
-  # merging w 2021 pop data
-  lsoa_pop_01_11_21_merged = lsoa_agg_pop_01_11_merged_w_21_lsoa %>%
-    full_join(lsoa_pop_2021_raw,
-              by = c("LSOA21CD" = "lsoa_21_code")) %>%
-    # dropping repeated LSOA name column
-    select(-"LSOA21NM")
-  
-  rm(lsoa_agg_pop_01_11_merged_w_21_lsoa,
-     lsoa_pop_2021_raw)
-  
-  # identifying 2021 LSOAs with missing 2011 or 2001 pop data
-  lsoa_pop_01_11_21_merged %>%
-    filter(is.na(pop_2011_final) | is.na(pop_2001_final)) %>%
-    nrow()
-  # there are 1044!
-  
-  # again, use the same impute algorithm as before
-  # England's pop grew by factor of 1.14368415562741 between 2001-2021
-  # and by a factor of 1.06492008640114 between 2011-2021
-  # see "Data/eng_wales_pop_over_time.xlsx"
-  # https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/datasets/populationestimatesforukenglandandwalesscotlandandnorthernireland
-  lsoa_pop_01_11_21_miss_imputed = lsoa_pop_01_11_21_merged %>%
-    mutate(pop_2011_final = ifelse(is.na(pop_2011_final),
-                                   total_lsoa_pop_21 / 1.06492008640114,
-                                   pop_2011_final
-    )
+    summarize(
+      pop_2001_lsoa_2011_nosplit = sum(usual_resident_pop_2001),
+      LSOA11NM = first(LSOA11NM),
+      CHGIND = first(CHGIND),
+      .groups = "drop"
     ) %>%
-    mutate(pop_2001_final = ifelse(is.na(pop_2001_final),
-                                   total_lsoa_pop_21 / 1.14368415562741,
-                                   pop_2001_final
+    # Join with 2011 population
+    left_join(lsoa_pop_2011_raw, by = c("LSOA11CD" = "lsoa_code_2011")) %>%
+    select(-lsoa_name_2011) %>%
+    # Impute 2001 pop for split LSOAs using national growth rate
+    mutate(
+      pop_2001_imputed = if_else(
+        CHGIND == "S",
+        usual_resident_pop_2011 / POP_GROWTH_FACTORS$ew_2001_to_2011,
+        pop_2001_lsoa_2011_nosplit
+      )
+    ) %>%
+    select(-pop_2001_lsoa_2011_nosplit)
+  
+  # Handle 2011 LSOAs that weren't in the 2001-2011 lookup (new LSOAs)
+  missing_2011_lsoas <- lsoa_pop_2011_raw %>%
+    anti_join(lsoa_pops_2001_2011, by = c("lsoa_code_2011" = "LSOA11CD")) %>%
+    transmute(
+      LSOA11CD = lsoa_code_2011,
+      LSOA11NM = lsoa_name_2011,
+      CHGIND = "N",  # newly added
+      usual_resident_pop_2011 = usual_resident_pop_2011,
+      pop_2001_imputed = usual_resident_pop_2011 / POP_GROWTH_FACTORS$ew_2001_to_2011_alt
     )
-    )
   
-  rm(lsoa_pop_01_11_21_merged)
+  lsoa_pops_2001_2011 <- bind_rows(lsoa_pops_2001_2011, missing_2011_lsoas)
   
-  # the land use statistics are only for English 2021 LSOAs
-  # checking we don't have any LSOAs not coded for England or Wales
-  lsoa_pop_01_11_21_miss_imputed %>%
-    filter(!startsWith(LSOA21CD, "E") & !startsWith(LSOA21CD, "W"))
-  # we don't
+  #-----------------------------------------------------------------------------
+  # 2011-2021 LSOA merging (chained)
+  #-----------------------------------------------------------------------------
   
-  # checking that the number of English LSOAs in the population dataset matches the number in the land use dataset
-  lsoa_pop_01_11_21_miss_imputed %>%
-    filter(startsWith(LSOA21CD, "E")) %>%
-    nrow()
-  # it does - 33755
-  
-  # only keeping English LSOAs
-  lsoa_eng_pop_01_11_21_miss_imputed = lsoa_pop_01_11_21_miss_imputed %>%
+  lsoa_pops_all_years <- lsoa_pops_2001_2011 %>%
+    # Join to 2011-2021 lookup
+    full_join(
+      lsoa_lookup_2011_to_2021_raw %>% select(2:7),
+      by = "LSOA11CD"
+    ) %>%
+    # Aggregate to 2021 LSOA level
+    group_by(LSOA21CD) %>%
+    summarize(
+      pop_2011_final = sum(usual_resident_pop_2011, na.rm = TRUE),
+      pop_2001_final = sum(pop_2001_imputed, na.rm = TRUE),
+      LSOA21NM = first(LSOA21NM),
+      LAD22CD = first(LAD22CD),
+      LAD22NM = first(LAD22NM),
+      .groups = "drop"
+    ) %>%
+    # Join 2021 population
+    full_join(lsoa_pop_2021_raw, by = c("LSOA21CD" = "lsoa_21_code")) %>%
+    select(-LSOA21NM) %>%
+    # Impute missing 2001/2011 values for new 2021 LSOAs
+    mutate(
+      pop_2011_final = if_else(
+        is.na(pop_2011_final) | pop_2011_final == 0,
+        total_lsoa_pop_21 / POP_GROWTH_FACTORS$ew_2011_to_2021,
+        pop_2011_final
+      ),
+      pop_2001_final = if_else(
+        is.na(pop_2001_final) | pop_2001_final == 0,
+        total_lsoa_pop_21 / POP_GROWTH_FACTORS$ew_2001_to_2021,
+        pop_2001_final
+      )
+    ) %>%
+    # Keep only English LSOAs
     filter(startsWith(LSOA21CD, "E"))
   
-  rm(lsoa_pop_01_11_21_miss_imputed)
+  #-----------------------------------------------------------------------------
+  # Join land use data
+  #-----------------------------------------------------------------------------
   
-  #_______________________________________________________________________________
-  ## importing land use data ####
+  lsoa_with_land_use <- lsoa_pops_all_years %>%
+    left_join(lsoa_land_use_2022_raw, by = c("LSOA21CD" = "lsoa_2021_code")) %>%
+    select(-lsoa_2021_name)
   
-  # joining with English LSOA land use data
-  lsoa_eng_pop_01_11_21_imputed_w_land_use = lsoa_eng_pop_01_11_21_miss_imputed %>%
-    left_join(lsoa_land_use_2022_raw,
-              by = c("LSOA21CD" = "lsoa_2021_code")) %>%
-    # dropping duplicated LSOA name col
-    select(-"lsoa_2021_name")
+  #-----------------------------------------------------------------------------
+  # Fix missing LAD codes (load from pre-computed API results)
+  #-----------------------------------------------------------------------------
   
-  #_______________________________________________________________________________
-  ## matching missing LAD codes ####
-  # checking how many distinct LAD codes there are in this LSOA dataset
-  lads_in_lsoa_data = lsoa_eng_pop_01_11_21_imputed_w_land_use %>%
-    distinct(LAD22CD, LAD22NM)
-  # 310 - one of these is NA
+  lads_to_add <- read_csv("Data/lads_to_add_backup.csv")
   
-  # splitting by 3-character geocode prefix
-  # E06, E07, E08, E09 (plus NA)
-  lad_prefix_counts = lads_in_lsoa_data %>%
-    mutate(prefix = str_sub(LAD22CD, 1, 3)) %>%
-    group_by(prefix) %>%
-    summarise(count = n_distinct(LAD22CD)) %>%
-    arrange(prefix)
-  print(lad_prefix_counts)
-  # 1 E06       59
-  # 2 E07      181
-  # 3 E08       36
-  # 4 E09       33
-  # 5 NA         1
-  
-  # investigating the NA-valued LAD
-  lsoas_w_missing_lad = lsoa_eng_pop_01_11_21_imputed_w_land_use %>%
-    filter(is.na(LAD22CD))
-  
-  #_______________________________________________________________________________
-  ## ## API call to match unmatched LSOAs to a LAD ####
-  # 
-  # # Create an empty dataframe to store results
-  # lads_to_add = data.frame(
-  #   LSOA21CD = character(),
-  #   LAD22CD = character()
-  # )
-  # # call the findthatpostcode.uk API to match the LAD22CD based on the LSOA
-  # # note that my wifi seems to be slow enough to not hit the rate limit...
-  # # ...if you do start hitting a rate limit, just use a Sys.sleep(`#secs`) command
-  # for(row in 1:nrow(lsoas_w_missing_lad)) {
-  #   lsoa_code_val = lsoas_w_missing_lad[[row, 1]]
-  #   url = paste0("https://findthatpostcode.uk/areas/", lsoa_code_val, ".json")
-  #   response = GET(url)
-  # 
-  #   while (response$status_code == 429) {
-  #     warning(paste("Rate limit exceeded for LSOA code: ", lsoa_code_val," - waiting 60 secs"))
-  #     Sys.sleep(60)  # Wait 60 seconds before continuing
-  #     response = GET(url)
-  #   }
-  # 
-  #   json_data = fromJSON(rawToChar(response$content))
-  # 
-  #   lad22_val = json_data[["included"]][["attributes"]][["itl"]][1]
-  #   
-  #   print(paste0("LSOA: ",lsoa_code_val," has LAD code: ",lad22_val,". Row ",row," complete"))
-  #   lads_to_add = lads_to_add %>%
-  #     add_row(LSOA21CD = lsoa_code_val, LAD22CD = lad22_val)
-  #   
-  # }
-  # 
-  # print("Rounds complete!")
-  # 
-  # # saving backup of API-called dataset
-  # write_csv(lads_to_add, "Data/lads_to_add_backup.csv")
-  ## UNCOMMENT TO HERE IF YOU WANT TO RE-RUN LAD API CALL ##
-  
-  ## COMMENT OUT THE COMMAND BELOW IF YOU WANT TO RE-RUN LAD API CALL ##
-  # loading in dataframe with results of API call
-  # ie LAD codes for entries previously missing them
-  lads_to_add = read_csv("Data/lads_to_add_backup.csv")
-  
-  # add these missing LAD codes back into the LSOA-LAD dataset
-  # note the LAD names are still missing
-  lsoa_eng_pop_01_11_21_nomiss_lad = lsoa_eng_pop_01_11_21_imputed_w_land_use %>%
+  lsoa_with_lad <- lsoa_with_land_use %>%
     left_join(lads_to_add, by = "LSOA21CD") %>%
     mutate(LAD22CD = coalesce(LAD22CD.x, LAD22CD.y)) %>%
-    # dropping redundant code columns
-    select(-c("LAD22CD.x","LAD22CD.y"))
+    select(-LAD22CD.x, -LAD22CD.y)
   
-  # now, after merging, checking how many distinct LAD codes there are in this LSOA dataset
-  # remember that the merged LAD22CD values don't have LAD22NM values, so we have to add these manually
-  lads_in_lsoa_data = lsoa_eng_pop_01_11_21_nomiss_lad %>%
-    group_by(LAD22CD) %>%
-    mutate(LAD22NM = first(LAD22NM[!is.na(LAD22NM)])) %>%
-    distinct(LAD22CD, LAD22NM)
-  # 309 values now - the NA value has been dropped
+  # Get list of valid LAD codes
+  valid_lad_codes <- lsoa_with_lad %>%
+    filter(!is.na(LAD22CD)) %>%
+    distinct(LAD22CD) %>%
+    pull(LAD22CD)
   
-  # splitting by 3-character geocode prefix
-  # E06, E07, E08, E09 (plus NA)
-  lad_prefix_counts = lads_in_lsoa_data %>%
-    mutate(prefix = str_sub(LAD22CD, 1, 3)) %>%
-    group_by(prefix) %>%
-    summarise(count = n_distinct(LAD22CD)) %>%
-    arrange(prefix)
-  print(lad_prefix_counts)
-  # as before:
-  # 1 E06       59
-  # 2 E07      181
-  # 3 E08       36
-  # 4 E09       33
+  #-----------------------------------------------------------------------------
+  # Process permitting data (chained)
+  #-----------------------------------------------------------------------------
   
-  rm(lsoa_eng_pop_01_11_21_miss_imputed,
-     lsoa_land_use_2022_raw)
+  perm_rates_by_year <- perm_rates_raw %>%
+    filter(LPACD %in% valid_lad_codes) %>%
+    mutate(
+      major_dwellings = as.numeric(na_if(`Total granted; major dwellings (all)`, "..")),
+      minor_dwellings = as.numeric(na_if(`Total granted; minor dwellings (all)`, "..")),
+      year = as.numeric(substr(Quarter, 1, 4))
+    ) %>%
+    group_by(LPACD, LPANM, year) %>%
+    summarise(
+      total_dwellings = sum(major_dwellings, na.rm = TRUE) + sum(minor_dwellings, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    filter(year <= PERM_DATA_END_YEAR)
   
-  #_______________________________________________________________________________
-  ## LAD permitting rates ####
-  # Extract the list of valid LAD codes from lads_in_lsoa_data
-  valid_lad_codes = lads_in_lsoa_data$LAD22CD
+  # Function to impute missing permit values via linear regression
+  impute_permits_lm <- function(data) {
+    if (sum(!is.na(data$total_dwellings)) < 2) return(data)
+    
+    model <- lm(total_dwellings ~ year, data = data[!is.na(data$total_dwellings), ])
+    data$total_dwellings_imputed <- pmax(predict(model, newdata = data), 0)
+    data$total_dwellings_final <- if_else(
+      is.na(data$total_dwellings),
+      data$total_dwellings_imputed,
+      data$total_dwellings
+    )
+    data
+  }
   
-  # Find LPACDs that don't meet the filter criteria
-  filtered_out_lpacd = perm_rates_raw %>%
-    filter(!LPACD %in% valid_lad_codes) %>%
-    distinct(LPACD) %>%
+  # Identify LPACDs that can't be imputed (all missing or only 1 obs)
+  lpacd_cant_impute <- perm_rates_by_year %>%
+    group_by(LPACD) %>%
+    summarise(n_nonmiss = sum(!is.na(total_dwellings)), .groups = "drop") %>%
+    filter(n_nonmiss <= 1) %>%
     pull(LPACD)
   
-  # Print the filtered-out LPACD values
-  print("LPACD values that were filtered out:")
-  print(filtered_out_lpacd)
-  
-  perm_rates_data = perm_rates_raw %>%
-    # Filter to keep only LPACDs that match the LAD22CD values
-    filter(LPACD %in% valid_lad_codes) %>%
-    # Replace ".." with NA and then convert to numeric
-    mutate(major_dwellings = ifelse(`Total granted; major dwellings (all)` == "..", NA, `Total granted; major dwellings (all)`),
-           minor_dwellings = ifelse(`Total granted; minor dwellings (all)` == "..", NA, `Total granted; minor dwellings (all)`),
-           major_dwellings = as.numeric(major_dwellings),
-           minor_dwellings = as.numeric(minor_dwellings),
-           year = as.numeric(substr(Quarter, 1, 4))) %>%
-    # Group and sum by LPACD and year
-    group_by(LPACD, LPANM, year) %>%
-    summarise(total_dwellings = sum(major_dwellings, na.rm = TRUE) + sum(minor_dwellings, na.rm = TRUE),
-              .groups = 'drop') %>%
-    # up to and including 2021
-    filter(year <= 2021) %>%
-    # Pivot wider to get years as columns
-    pivot_wider(names_from = year,
-                values_from = total_dwellings,
-                names_prefix = "total_maj_and_min_dwellings_")
-  
-  #_______________________________________________________________________________
-  ## imputing missing permitting data using linear regression ####
-  # Convert to long format for easier analysis of missing patterns
-  perm_rates_long = perm_rates_data %>%
-    pivot_longer(cols = starts_with("total_maj_and_min_dwellings_"),
-                 names_to = "year", 
-                 values_to = "total_dwellings") %>%
-    mutate(year = as.numeric(gsub("total_maj_and_min_dwellings_", "", year)))
-  
-  # Check which LPACDs have all missing values or only 1 non-missing value
-  missing_data_check = perm_rates_long %>%
-    group_by(LPACD) %>%
-    summarise(LPANM = first(LPANM),
-              n_missing = sum(is.na(total_dwellings)),
-              n_total = n(),
-              n_non_missing = n_total - n_missing,
-              .groups = 'drop') %>%
-    filter(n_missing == n_total | n_non_missing <= 1)
-  
-  # Create the vector of LPACDs that can't be imputed
-  lpacd_noimp_miss_val = missing_data_check$LPACD
-  
-  # Function to perform linear imputation for a single LPACD
-  impute_missing = function(data) {
-    # Check if we have any non-missing data
-    if(sum(!is.na(data$total_dwellings)) < 2) {
-      # If less than 2 non-missing points, we can't do linear regression
-      # Return original data
-      return(data)
-    }
-    
-    # Fit linear model on non-missing data
-    model = lm(total_dwellings ~ year, data = data[!is.na(data$total_dwellings),])
-    
-    # Predict for all years
-    data$total_dwellings_imputed = predict(model, newdata = data)
-    
-    # Apply zero floor to predictions (replace negative values with zero)
-    # so that there are no predicted negative values for the number of permits
-    data$total_dwellings_imputed = pmax(data$total_dwellings_imputed, 0)
-    
-    # Use original values where available, imputed values where missing
-    data$total_dwellings_final = ifelse(is.na(data$total_dwellings), 
-                                        data$total_dwellings_imputed,
-                                        data$total_dwellings)
-    return(data)
-  }
-  
-  # Now apply imputation
-  perm_rates_imputed = perm_rates_long %>%
+  # Apply linear imputation
+  perm_rates_imputed <- perm_rates_by_year %>%
     group_by(LPACD, LPANM) %>%
-    group_modify(~impute_missing(.x)) %>%
+    group_modify(~impute_permits_lm(.x)) %>%
     ungroup()
   
-  # Reshape back to wide format
-  perm_rates_final = perm_rates_imputed %>%
-    select(-total_dwellings, -total_dwellings_imputed) %>%  # Remove intermediate columns
-    pivot_wider(names_from = year,
-                values_from = total_dwellings_final,
-                names_prefix = "total_maj_and_min_dwellings_")
-  
-  # Print these LPACDs
-  print("LPACDs with all missing values or only 1 non-missing value (can't perform imputation):")
-  print(missing_data_check)
-  # 2 of these
-  
-  # for the 2 LPACDs with missing (non-imputable) values
-  # use median values of permitting numbers from bordering LADs in the same region
-  # https://ons.maps.arcgis.com/apps/webappviewer/index.html?id=5cec9cc7208d418fbc1e7f538cb8745f
-  # North Northamptonshire E06000061 
-  lads_bordering_E06000061 = c("E06000017", # Rutland
-                               "E07000141", # South Kesteven
-                               "E06000031", # Peterborough
-                               "E07000011", # Huntingdonshire
-                               "E06000055", # Bedford
-                               "E06000042", # Milton Keynes
-                               "E06000062", # West Northamptonshire
-                               "E07000131" # Harborough
-  )
-  
-  # West Northamptonshire E06000062 
-  lads_bordering_E06000062 = c("E07000131", # Harborough
-                               "E06000061", # North Northamptonshire
-                               "E06000042", # Milton Keynes
-                               "E06000060", # Buckinghamshire
-                               "E07000177", # Cherwell
-                               "E07000221", # Stratford-upon-Avon
-                               "E07000220" # Rugby
-  )
-  
-  # Function to impute values based on bordering LADs
-  impute_from_bordering_lads = function(target_lpacd, bordering_lpacds, data_wide, data_long) {
-    # Filter bordering LADs that exist in the dataset and aren't in missing_data_check
-    valid_bordering_lpacds = bordering_lpacds[bordering_lpacds %in% 
-                                                setdiff(unique(data_long$LPACD), 
-                                                        lpacd_noimp_miss_val)]
+  # For LPACDs that couldn't be imputed, use median of bordering LADs
+  impute_from_bordering <- function(target_lpacd, bordering_lpacds, data) {
+    valid_bordering <- bordering_lpacds[bordering_lpacds %in% setdiff(unique(data$LPACD), lpacd_cant_impute)]
+    if (length(valid_bordering) == 0) return(NULL)
     
-    if(length(valid_bordering_lpacds) == 0) {
-      warning(paste("No valid bordering LADs found for", target_lpacd))
-      return(NULL)
-    }
-    
-    # Get the name of the target LAD
-    target_name = missing_data_check$LPANM[missing_data_check$LPACD == target_lpacd]
-    
-    # Get data for bordering LADs in long format
-    bordering_data_long = data_long %>%
-      filter(LPACD %in% valid_bordering_lpacds)
-    
-    # Calculate median values for each year
-    imputed_values = bordering_data_long %>%
+    data %>%
+      filter(LPACD %in% valid_bordering) %>%
       group_by(year) %>%
-      summarise(total_dwellings_final = median(total_dwellings_final, na.rm = TRUE),
-                .groups = 'drop') %>%
-      # Add target LPACD and name
-      mutate(LPACD = target_lpacd,
-             LPANM = target_name)
-    
-    return(imputed_values)
+      summarise(total_dwellings_final = median(total_dwellings_final, na.rm = TRUE), .groups = "drop") %>%
+      mutate(LPACD = target_lpacd)
   }
   
-  # Create data structure to store all imputed values
-  bordering_imputed_values = list()
-  
-  # Apply imputation for each LPACD in missing_data_check
-  bordering_imputed_values[["E06000061"]] = impute_from_bordering_lads(
-    "E06000061", lads_bordering_E06000061, perm_rates_final, perm_rates_imputed)
-  
-  bordering_imputed_values[["E06000062"]] = impute_from_bordering_lads(
-    "E06000062", lads_bordering_E06000062, perm_rates_final, perm_rates_imputed)
-  
-  # Combine all imputed values into a single dataframe
-  bordering_imputed_combined = bind_rows(bordering_imputed_values)
-  
-  # Convert back to wide format for merging with main dataset
-  bordering_imputed_wide = bordering_imputed_combined %>%
-    pivot_wider(id_cols = c(LPACD, LPANM),
-                names_from = year,
-                values_from = total_dwellings_final,
-                names_prefix = "total_maj_and_min_dwellings_")
-  
-  # Remove the non-imputable LPACDs from the final dataset
-  perm_rates_final_cleaned = perm_rates_final %>%
-    filter(!LPACD %in% lpacd_noimp_miss_val)
-  
-  # Add the newly imputed values
-  perm_rates_final_with_bordering = bind_rows(
-    perm_rates_final_cleaned,
-    bordering_imputed_wide
+  bordering_imputed <- map2_dfr(
+    names(BORDERING_LADS),
+    BORDERING_LADS,
+    ~impute_from_bordering(.x, .y, perm_rates_imputed)
   )
   
-  # Print summary of imputation results
-  cat("\nImputation summary:\n")
-  cat("Number of LPACDs that couldn't be imputed with linear regression:", length(lpacd_noimp_miss_val), "\n")
-  cat("Number of LPACDs successfully imputed using bordering LADs:", 
-      nrow(bordering_imputed_wide), "\n")
+  # Combine and aggregate to summary
+  perm_rates_final <- perm_rates_imputed %>%
+    filter(!LPACD %in% lpacd_cant_impute) %>%
+    select(LPACD, LPANM, year, total_dwellings_final) %>%
+    bind_rows(bordering_imputed) %>%
+    # Handle any duplicates by summing
+    group_by(LPACD, year) %>%
+    summarise(total_dwellings_final = sum(total_dwellings_final, na.rm = TRUE), .groups = "drop")
   
-  # removing intermediate datasets
-  rm(list = ls(pattern = "^lads_bordering_E0"))
-  rm(bordering_imputed_combined,
-     bordering_imputed_values,
-     bordering_imputed_wide,
-     perm_rates_data,
-     perm_rates_final,
-     perm_rates_final_cleaned,
-     perm_rates_imputed,
-     perm_rates_long,
-     perm_rates_raw)
-  
-  # Identify which LPACD value is duplicated
-  duplicated_lpacd = perm_rates_final_with_bordering %>%
+  perm_rates_summary <- perm_rates_final %>%
     group_by(LPACD) %>%
-    filter(n() > 1) %>%
-    pull(LPACD) %>%
-    unique()
-  
-  # Confirm it's E07000112 as you mentioned
-  print(duplicated_lpacd)
-  
-  # Extract the duplicate rows
-  duplicate_rows = perm_rates_final_with_bordering %>%
-    filter(LPACD == duplicated_lpacd)
-  
-  # Create the aggregated row:
-  # 1. Keep LPACD as E07000112
-  # 2. Keep LPANM as "Folkestone and Hythe"
-  # 3. Sum all other columns
-  aggregated_row = duplicate_rows %>%
-    summarize(
-      LPACD = first(LPACD),
-      LPANM = first(LPANM),
-      across(where(is.numeric), sum)
+    summarise(
+      sum_perms_01_11 = sum(total_dwellings_final[year >= 2001 & year <= 2011], na.rm = TRUE),
+      sum_perms_01_21 = sum(total_dwellings_final, na.rm = TRUE),
+      .groups = "drop"
     )
   
-  # Remove the duplicate rows from the original dataframe
-  perm_rates_final_with_bordering = perm_rates_final_with_bordering %>%
-    filter(LPACD != duplicated_lpacd)
+  #-----------------------------------------------------------------------------
+  # LSOA to BUA mapping (chained)
+  #-----------------------------------------------------------------------------
   
-  # Add the aggregated row back to the dataframe
-  perm_rates_final_with_bordering = bind_rows(
-    perm_rates_final_with_bordering, 
-    aggregated_row
-  )
+  buas_to_add <- read_csv("Data/buas_to_add_backup.csv")
   
-  # Verify no more duplicates exist
-  any_duplicates = perm_rates_final_with_bordering %>%
-    group_by(LPACD) %>%
-    filter(n() > 1) %>%
-    nrow()
-  
-  print(paste0("Duplicates remaining: ", any_duplicates))
-  
-  # Calculate sum of permits for 2001-2011 and 2001-2021 periods
-  perm_rates_summary = perm_rates_final_with_bordering %>%
-    rowwise() %>%
-    mutate(# Sum of permits for 2001-2011
-      sum_perms_01_11 = sum(
-        c_across(starts_with("total_maj_and_min_dwellings_2001"):starts_with("total_maj_and_min_dwellings_2011")),
-        na.rm = TRUE),
-      # Sum of permits for 2001-2021
-      sum_perms_01_21 = sum(
-        c_across(starts_with("total_maj_and_min_dwellings_")),
-        na.rm = TRUE)) %>%
-    
-    ungroup() %>%
-    # Keep only LPACD, LPANM, and the new sum columns
-    select(LPACD, LPANM, sum_perms_01_11, sum_perms_01_21)
-  
-  rm(perm_rates_final_with_bordering,
-     duplicate_rows)
-  
-  # # joining LSOA pop & land use data to LSOA-BUA lookup
-  # lsoa_bua_eng_pop_01_11_21_land_use = lsoa_eng_pop_01_11_21_nomiss_lad %>%
-  # left_join(lsoa_bua_eng_lookup_2021_complete,
-  #           by = "LSOA21CD") %>%
-  # # dropping duplicated LSOA name col
-  # select(-c("lsoa_21_name")) %>%
-  # # dropping invalid BUA code (E63999999)
-  # filter(BUA22CD != "E63999999")
-  
-  #_______________________________________________________________________________
-  ## LSOA to BUA data ####
-  
-  # cleaning
-  lsoa_bua_eng_lookup_2021_narrow = lsoa_bua_lookup_2021_raw %>%
-    # removing irrelevant cols from LSOA to BUA lookup
-    select(-c(ends_with("W"),"ObjectId")) %>%
-    # keeping only English LSOAs
-    filter(startsWith(LSOA21CD, "E"))
-  # 33755 rows - matches number in pop & land use dataframe
-  
-  rm(lsoa_bua_lookup_2021_raw)
-  
-  # identifying any rows that have any missing entries
-  missing_buas = lsoa_bua_eng_lookup_2021_narrow %>%
-    filter(if_any(everything(), is.na)) %>%
-    # keeping only the LSOA codes
-    select("LSOA21CD")
-  # there are lots (2280)
-  
-  #_______________________________________________________________________________
-  ## ## API to match unmatched LSOAs to BUAs ####
-  # 
-  # library(httr)
-  # library(jsonlite)
-  # 
-  # # Create an empty dataframe to store results
-  # buas_to_add = data.frame(
-  #   LSOA21CD = character(),
-  #   BUA22CD = character()
-  # )
-  # # call the findthatpostcode.uk API to match the BUA22CD based on the LSOA
-  # # note that my wifi seems to be slow enough to not hit the rate limit...
-  # # ...if you do start hitting a rate limit, just use a Sys.sleep(`#secs`) command
-  # for(row in 1:nrow(missing_buas)) {
-  #   lsoa_code_val = missing_buas[[row, 1]]
-  #   url = paste0("https://findthatpostcode.uk/areas/", lsoa_code_val, ".json")
-  #   response = GET(url)
-  #   
-  #   while (response$status_code == 429) {
-  #     warning(paste("Rate limit exceeded for LSOA code: ", lsoa_code_val," - waiting 60 secs"))
-  #     Sys.sleep(60)  # Wait 60 seconds before continuing
-  #     response = GET(url)
-  #   }
-  #   
-  #   json_data = fromJSON(rawToChar(response$content))
-  #   
-  #   # for some reason, the API will sometimes give an invalid BUA code - E63999999.
-  #   # in some cases, it seems to be legitimate (probably, there's no BUA present)
-  #   # but in others, the solution seems to be to just keep asking
-  #   # and eventually, it will return a correct BUA code!
-  #   E63999999_count = 1
-  #   max_E63999999_count = 20
-  #   
-  #   while (json_data[["included"]][["attributes"]][["bua22"]][1] == "E63999999" && E63999999_count <= max_E63999999_count) {
-  #     print(paste0("LSOA: ",missing_buas[[row, 1]]," gave E63999999 (invalid code)"))
-  #     response = GET(url)
-  #     json_data = fromJSON(rawToChar(response$content))
-  #     bua22_val = json_data[["included"]][["attributes"]][["bua22"]][1]
-  #     E63999999_count = E63999999_count + 1
-  #   }
-  #   
-  #   bua22_val = json_data[["included"]][["attributes"]][["bua22"]][1]
-  #   
-  #   if (E63999999_count > max_E63999999_count) {
-  #     print(paste0("LSOA: ",missing_buas[[row, 1]]," kept giving E63999999 (invalid code) even after ",max_E63999999_count," attempts - assigning it E63999999. Row ",row," complete"))
-  #   } else {
-  #     print(paste0("LSOA: ",lsoa_code_val," has BUA code: ",bua22_val,". Row ",row," complete"))
-  #   }
-  #   buas_to_add = buas_to_add %>%
-  #     add_row(LSOA21CD = lsoa_code_val, BUA22CD = bua22_val)
-  # }
-  # 
-  # print("Rounds complete!")
-  # 
-  # # saving backup of API-called dataset
-  # write_csv(buas_to_add, "Data/buas_to_add_backup.csv")
-  # 
-  # # checking for invalid BUA code (E63999999)
-  # buas_to_add %>%
-  #   filter(BUA22CD == "E63999999") %>%
-  #   nrow
-  # # 203 LSOAs have invalid corresponding BUA code
-  ## UNCOMMENT TO HERE IF YOU WANT TO RE-RUN BUA API CALL!!!!!!!!!!!!!!!!!!!!! ##
-  
-  ## COMMENT OUT THE COMMAND BELOW IF YOU WANT TO RE-RUN BUA API CALL!!!!!!!!!!!!!!!!!!!!! ##
-  # loading in dataframe with results of API call
-  # ie BUA codes for entries previously missing them
-  buas_to_add = read_csv("Data/buas_to_add_backup.csv")
-  
-  rm(missing_buas)
-  
-  #_______________________________________________________________________________
-  ## merging BUA API data with other datasets ####
-  
-  # add these missing BUA codes back into the LSOA-BUA lookup
-  # note the BUA names are still missing
-  lsoa_bua_eng_lookup_2021_complete = lsoa_bua_eng_lookup_2021_narrow %>%
+  lsoa_bua_lookup <- lsoa_bua_lookup_2021_raw %>%
+    select(-ends_with("W"), -ObjectId) %>%
+    filter(startsWith(LSOA21CD, "E")) %>%
     left_join(buas_to_add, by = "LSOA21CD") %>%
     mutate(BUA22CD = coalesce(BUA22CD.x, BUA22CD.y)) %>%
-    # dropping redundant BUA code columns
-    select(-c("BUA22CD.x","BUA22CD.y"))
+    select(-BUA22CD.x, -BUA22CD.y)
   
-  rm(lsoa_bua_eng_lookup_2021_narrow)
+  #-----------------------------------------------------------------------------
+  # Join all LSOA data together
+  #-----------------------------------------------------------------------------
   
-  # checking again for invalid BUA code (E63999999)
-  lsoa_bua_eng_lookup_2021_complete %>%
-    filter(BUA22CD == "E63999999") %>%
-    print(n = 10000)
-  
-  # joining LSOA pop & land use data to LSOA-BUA lookup
-  lsoa_bua_eng_pop_01_11_21_land_use = lsoa_eng_pop_01_11_21_nomiss_lad %>%
-    left_join(lsoa_bua_eng_lookup_2021_complete,
-              by = "LSOA21CD") %>%
-    # coalescing repeated columns
-    mutate(LAD22NM = coalesce(LAD22NM.x, LAD22NM.y)) %>%
-    mutate(LAD22CD = coalesce(LAD22CD.x, LAD22CD.y)) %>%
-    # dropping duplicated column names
-    select(-c("lsoa_21_name", 
-              "LAD22NM.x","LAD22NM.y",
-              "LAD22CD.x","LAD22CD.y")) %>%
-    # dropping invalid BUA code (E63999999)
-    filter(BUA22CD != "E63999999")
-  
-  rm(lsoa_bua_eng_lookup_2021_complete)
-  
-  # checking to see if anything is missing
-  lsoa_bua_eng_pop_01_11_21_land_use %>%
-    filter(is.na(BUA22CD))
-  # nothing else missing - good!
-  
-  # I noticed an error in one of the LSOA to BUA codings
-  # rectifying
-  lsoa_bua_eng_pop_01_11_21_land_use = lsoa_bua_eng_pop_01_11_21_land_use %>%
+  lsoa_full <- lsoa_with_lad %>%
+    left_join(lsoa_bua_lookup %>% select(LSOA21CD, BUA22CD, BUA22NM, RGN22CD, RGN22NM), by = "LSOA21CD") %>%
+    # Remove invalid BUA code
+    filter(BUA22CD != "E63999999") %>%
+    # Fix Kingston upon Thames coding error
     mutate(
       BUA22NM = if_else(LSOA21CD == "E01002946", "Kingston upon Thames", BUA22NM),
       BUA22CD = if_else(LSOA21CD == "E01002946", "E63005164", BUA22CD)
     )
   
-  #_______________________________________________________________________________
-  ## using LAD permit data to estimate BUA permit data ####
-  # Create a mapping table
-  lsoa_mapping = lsoa_bua_eng_pop_01_11_21_land_use %>%
-    select(LSOA21CD, LAD22CD, BUA22CD, pop_2001_final) %>%
-    # Ensure we have the BUA code for each LSOA
-    filter(!is.na(BUA22CD))
+  #-----------------------------------------------------------------------------
+  # Distribute LAD permits to BUAs by population share
+  #-----------------------------------------------------------------------------
   
-  # calculating proportion of the LAD population living in each BUA
-  lad_bua_population = lsoa_mapping %>%
-    # Group by LAD and BUA
+  lad_bua_pop_shares <- lsoa_full %>%
+    filter(!is.na(BUA22CD)) %>%
     group_by(LAD22CD, BUA22CD) %>%
-    # Sum population for each LAD-BUA combination
-    summarise(bua_in_lad_population = sum(pop_2001_final, na.rm = TRUE),
-              .groups = "drop") %>%
-    # Calculate total population by LAD
+    summarise(bua_in_lad_pop = sum(pop_2001_final, na.rm = TRUE), .groups = "drop") %>%
     group_by(LAD22CD) %>%
-    mutate(lad_total_population = sum(bua_in_lad_population),
-           # Calculate proportion of LAD population in each BUA
-           population_proportion = bua_in_lad_population / lad_total_population) %>%
-    ungroup()
-  # checking for any missing rows:
-  lad_bua_population %>% filter(if_any(everything(), is.na))
-  # nothing - good
-  
-  # applying population proportions to distribute LAD-level permitting data to BUAs
-  bua_permits = lad_bua_population %>%
-    # Join with permitting data (assuming you've matched LAD22CD with LPACD)
-    left_join(perm_rates_summary, by = c("LAD22CD" = "LPACD")) %>%
-    # Calculate BUA-level permits based on population proportion
     mutate(
-      sum_bua_perms_01_11 = sum_perms_01_11 * population_proportion,
-      sum_bua_perms_01_21 = sum_perms_01_21 * population_proportion
-    )
+      lad_total_pop = sum(bua_in_lad_pop),
+      pop_share = bua_in_lad_pop / lad_total_pop
+    ) %>%
+    ungroup()
   
-  # Aggregate to get total permits for each BUA (summing across LADs)
-  bua_total_permits = bua_permits %>%
+  bua_permits <- lad_bua_pop_shares %>%
+    left_join(perm_rates_summary, by = c("LAD22CD" = "LPACD")) %>%
+    mutate(
+      bua_perms_01_11 = sum_perms_01_11 * pop_share,
+      bua_perms_01_21 = sum_perms_01_21 * pop_share
+    ) %>%
     group_by(BUA22CD) %>%
     summarise(
-      bua_pop_01 = sum(bua_in_lad_population, na.rm = TRUE),
-      sum_bua_perms_01_11 = sum(sum_bua_perms_01_11, na.rm = TRUE),
-      sum_bua_perms_01_21 = sum(sum_bua_perms_01_21, na.rm = TRUE),
+      bua_pop_01 = sum(bua_in_lad_pop, na.rm = TRUE),
+      sum_bua_perms_01_11 = sum(bua_perms_01_11, na.rm = TRUE),
+      sum_bua_perms_01_21 = sum(bua_perms_01_21, na.rm = TRUE),
       .groups = "drop"
     )
   
-  rm(lsoa_eng_pop_01_11_21_nomiss_lad)
+  #-----------------------------------------------------------------------------
+  # Aggregate to BUA level with London consolidation
+  #-----------------------------------------------------------------------------
   
-  #_______________________________________________________________________________
-  ## final joining incl London ####
-  
-  # aggregating london BUAs
-  # need to aggregate London BUAs
-  london_buas = data.frame(
-    BUA22NM = c("City and County of the City of London",
-                "Barking and Dagenham",
-                "Barnet",
-                "Bexley",
-                "Brent",
-                "Bromley",
-                "Camden",
-                "Croydon",
-                "Ealing",
-                "Enfield",
-                "Greenwich",
-                "Hackney",
-                "Hammersmith and Fulham",
-                "Haringey",
-                "Harrow",
-                "Havering",
-                "Hillingdon",
-                "Hounslow",
-                "Islington",
-                "Kensington and Chelsea",
-                "Kingston upon Thames",
-                "Lambeth",
-                "Lewisham",
-                "Merton",
-                "Newham",
-                "Redbridge",
-                "Richmond upon Thames",
-                "Southwark",
-                "Sutton (Sutton)",
-                "Tower Hamlets",
-                "Waltham Forest",
-                "Wandsworth",
-                "City of Westminster"
-    ),
-    
-    BUA22CD = c("E63004906",
-                "E63004859",
-                "E63004747",
-                "E63004992",
-                "E63004844",
-                "E63005189",
-                "E63004858",
-                "E63005267",
-                "E63004894",
-                "E63004679",
-                "E63004986",
-                "E63004850",
-                "E63004944",
-                "E63004793",
-                "E63004781",
-                "E63004796",
-                "E63004882",
-                "E63005014",
-                "E63004860",
-                "E63004950",
-                "E63005164",
-                "E63005063",
-                "E63005035",
-                "E63005121",
-                "E63004881",
-                "E63004790",
-                "E63005073",
-                "E63004965",
-                "E63005250",
-                "E63004898",
-                "E63004797",
-                "E63005033",
-                "E63004916"
+  # Aggregate permits with London consolidation
+  bua_permits_london <- bua_permits %>%
+    mutate(BUA22CD = if_else(BUA22CD %in% LONDON_BUAS$BUA22CD, "LON999999", BUA22CD)) %>%
+    group_by(BUA22CD) %>%
+    summarise(
+      bua_pop_01 = sum(bua_pop_01),
+      sum_bua_perms_01_11 = sum(sum_bua_perms_01_11),
+      sum_bua_perms_01_21 = sum(sum_bua_perms_01_21),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      bua_perm_rate_01_11 = sum_bua_perms_01_11 / bua_pop_01,
+      bua_perm_rate_01_21 = sum_bua_perms_01_21 / bua_pop_01
     )
-  )
   
-  ## Aggregating London BUA permit data level ####
-  bua_total_permits_lon = bua_total_permits %>%
-    # Replace London BUA codes with a single user-defined code
-    mutate(BUA22CD = ifelse(BUA22CD %in% london_buas$BUA22CD,
-                            "LON999999", 
-                            BUA22CD)) %>%
-    # Group by the modified BUA22CD
+  # Aggregate LSOA data to BUA level with London consolidation
+  city_data <- lsoa_full %>%
+    mutate(
+      BUA22CD = if_else(BUA22CD %in% LONDON_BUAS$BUA22CD, "LON999999", BUA22CD),
+      BUA22NM = if_else(BUA22NM %in% LONDON_BUAS$BUA22NM, "Greater London", BUA22NM)
+    ) %>%
     group_by(BUA22CD) %>%
-    # Create the aggregations
-    summarize(bua_pop_01 = sum(bua_pop_01),
-              sum_bua_perms_01_11 = sum(sum_bua_perms_01_11),
-              sum_bua_perms_01_21 = sum(sum_bua_perms_01_21)) %>%
-    # total permits per initial housing unit (i.e. per initial individual)
-    # "initial" meaning 2001
-    mutate(bua_perm_rate_01_11 = sum_bua_perms_01_11 / bua_pop_01,
-           bua_perm_rate_01_21 = sum_bua_perms_01_21 / bua_pop_01)
-  
-  ## Aggregating up to BUA level ####
-  agg_eng_pop_01_11_21_land_use_w_london = lsoa_bua_eng_pop_01_11_21_land_use %>%
-    # Replace London BUA codes with a single user-defined code
-    mutate(BUA22CD = ifelse(BUA22CD %in% london_buas$BUA22CD,
-                            "LON999999", 
-                            BUA22CD)) %>%
-    mutate(BUA22NM = ifelse(BUA22NM %in% london_buas$BUA22NM, 
-                            "Greater London", 
-                            BUA22NM)) %>%
-    # Group by the modified BUA22CD
-    group_by(BUA22CD) %>%
-    # Create the aggregations
-    summarize(
-      # Keep first non-empty BUA22NM
+    summarise(
       BUA22NM = first(na.omit(BUA22NM)),
       RGN22CD = first(na.omit(RGN22CD)),
       RGN22NM = first(na.omit(RGN22NM)),
       bua_01_pop = sum(pop_2001_final),
       bua_11_pop = sum(pop_2011_final),
       bua_21_pop = sum(total_lsoa_pop_21),
-      # 1/z_i is fraction of land that's geographically unconstrained
-      # so z_i is 1/(1-fraction of land that's geographically *constrained*)
-      # calculating different values, averaging/summarising land constraints in different ways
-      mean_z_i = 1/(1-(mean(pct_forest_open_land_water) / 100)),
-      median_z_i = 1/(1-(median(pct_forest_open_land_water) / 100)),
-      min_z_i = 1/(1-(min(pct_forest_open_land_water) / 100))
-    )
-  
-  #_______________________________________________________________________________
-  ## merging permit data with main dataset ####
-  agg_eng_pop_01_11_21_land_use_w_london = agg_eng_pop_01_11_21_land_use_w_london %>%
-    left_join(bua_total_permits_lon,
-              by = "BUA22CD") %>%
-    select(-c("bua_pop_01"))
-  
-  rm(lsoa_bua_eng_pop_01_11_21_land_use,
-     bua_total_permits_lon,
-     london_buas)
-  
-  # drop any BUAs that are below your city size threshold (20k)
-  agg_pop_01_11_21_ovr_city_threshold = agg_eng_pop_01_11_21_land_use_w_london %>%
-    filter(bua_21_pop >= city_pop_threshold)
-  
-  rm(agg_eng_pop_01_11_21_land_use_w_london)
-  
-  # check to see if there are any remaining BUAs with no name
-  agg_pop_01_11_21_ovr_city_threshold %>%
-    filter(is.na(BUA22NM))
-  # there are none
-  
-  # rounding population values
-  agg_pop_01_11_21_ovr_city_threshold_rounded = agg_pop_01_11_21_ovr_city_threshold %>%
+      # Geographic constraints: z_i = 1/(1 - fraction constrained)
+      mean_z_i = 1 / (1 - mean(pct_forest_open_land_water) / 100),
+      median_z_i = 1 / (1 - median(pct_forest_open_land_water) / 100),
+      min_z_i = 1 / (1 - min(pct_forest_open_land_water) / 100),
+      .groups = "drop"
+    ) %>%
+    # Join permit data
+    left_join(bua_permits_london %>% select(BUA22CD, bua_perm_rate_01_11, bua_perm_rate_01_21), by = "BUA22CD") %>%
+    # Apply population threshold
+    filter(bua_21_pop >= CITY_POP_THRESHOLD) %>%
+    # Round populations
     mutate(across(c(bua_01_pop, bua_11_pop, bua_21_pop), round)) %>%
-    select(-c("sum_bua_perms_01_11","sum_bua_perms_01_21"))
-  
-  #_______________________________________________________________________________
-  ## adding in research labour share values (l_i) ####
-  # from p.11 https://www.enterpriseresearch.ac.uk/wp-content/uploads/2021/09/ERC-Insight-The-UK%E2%80%99s-business-RD-workforce-Belt.Ri_.Akinremi.pdf
-  agg_pop_01_11_21_ovr_city_threshold_rounded = agg_pop_01_11_21_ovr_city_threshold_rounded %>%
-    mutate(l_i = case_when(
-      RGN22NM == "North East" ~ 0.0052,
-      RGN22NM == "North West" ~ 0.0060,
-      RGN22NM == "Yorkshire and The Humber" ~ 0.0056,
-      RGN22NM == "East Midlands" ~ 0.0088,
-      RGN22NM == "West Midlands" ~ 0.0097,
-      RGN22NM == "East of England" ~ 0.0143,
-      RGN22NM == "London" ~ 0.0069,
-      RGN22NM == "South East" ~ 0.013,
-      RGN22NM == "South West" ~ 0.0083
-    ))
-  
-  rm(agg_pop_01_11_21_ovr_city_threshold,
-     perm_rates_summary,
-     valid_lad_codes,
-     filtered_out_lpacd,
-     lpacd_noimp_miss_val,
-     any_duplicates,
-     missing_data_check,
-     lsoa_mapping,
-     lsoa_eng_pop_01_11_21_imputed_w_land_use,
-     lsoas_w_missing_lad,
-     lads_in_lsoa_data,
-     lads_to_add,
-     lad_prefix_counts,
-     lad_bua_population,
-     buas_to_add,
-     bua_total_permits,
-     bua_permits,
-     aggregated_row)
-  
-  #_______________________________________________________________________________
-  # testing the original DP model on data ####
-  
-  # total population of England
-  # https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/timeseries/enpop/pop
-  tot_01_pop = 49449700
-  tot_21_pop = 56554900
-  
-  # urban population based on aggregated BUA dataset
-  urb_01_pop = sum(agg_pop_01_11_21_ovr_city_threshold_rounded$bua_01_pop)
-  urb_21_pop = sum(agg_pop_01_11_21_ovr_city_threshold_rounded$bua_21_pop)
-  
-  # rural pop is difference between total and urban pop
-  rur_01_pop = tot_01_pop - urb_01_pop
-  rur_21_pop = tot_21_pop - urb_21_pop
-  
-  # removing irrelevant geographic constraint variables
-  geographic_constraint_list_for_removal = geographic_constraint_potential_list[geographic_constraint_potential_list != geographic_constraint]
-  agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints = agg_pop_01_11_21_ovr_city_threshold_rounded %>%
-    select(-all_of(geographic_constraint_list_for_removal)) %>%
-    # arranging by descending order of 2021 population
+    # Add R&D labour shares
+    mutate(l_i = recode(RGN22NM, !!!RD_LABOUR_SHARES)) %>%
+    # Keep only selected geographic constraint
+    select(-all_of(setdiff(GEOGRAPHIC_CONSTRAINT_OPTIONS, GEOGRAPHIC_CONSTRAINT_VAR))) %>%
+    rename(geographic_constraint = all_of(GEOGRAPHIC_CONSTRAINT_VAR)) %>%
     arrange(desc(bua_21_pop))
   
-  # intermediate save
-  write_csv(agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints,
-            "Data/agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints.csv")
+  # Save intermediate data
+  write_csv(city_data, "Data/agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints.csv")
   
-  #_______________________________________________________________________________
-  # intermediate save - can run from here ####
-  agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints = read_csv("Data/agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints.csv")
+  # Compute derived population values
+  urb_01_pop <- sum(city_data$bua_01_pop)
+  urb_21_pop <- sum(city_data$bua_21_pop)
+  rur_01_pop <- POP_ENGLAND$y2001 - urb_01_pop
+  rur_21_pop <- POP_ENGLAND$y2021 - urb_21_pop
   
-  rm(
-    counterfactual_results_tibble,
-    agg_pop_01_11_21_ovr_city_threshold_rounded
+  message("Data construction complete.")
+}
+
+
+#===============================================================================
+# COUNTERFACTUAL ANALYSIS FUNCTIONS
+#===============================================================================
+
+#-------------------------------------------------------------------------------
+# Prepare data for counterfactual (returns list, no global assignment)
+#-------------------------------------------------------------------------------
+prepare_counterfactual_data <- function(
+    city_data,
+    cities_in_cf,
+    params,  # list with gamma, theta, sigma, beta, lambda
+    pop_totals  # list with tot_01, tot_21, urb_01, urb_21, rur_01, rur_21
+) {
+  gamma <- params$gamma
+  theta <- params$theta
+  sigma <- params$sigma
+  beta <- params$beta
+  lambda <- params$lambda
+  
+  # Compute income and consumption coefficients (DP equations 8, 21, 22)
+  cf_data <- city_data %>%
+    mutate(
+      # Coefficient for rho*A*h (eq 21 divided by tau)
+      eq_rho_A_h_coeff = (gamma + theta) / ((sigma + beta) * (gamma + 1)) *
+        (geographic_constraint^gamma / (1 - l_i)),
+      eq_rho_A_h_coeff_01 = eq_rho_A_h_coeff * bua_01_pop^(gamma + theta - sigma - beta),
+      eq_rho_A_h_coeff_21 = eq_rho_A_h_coeff * bua_21_pop^(gamma + theta - sigma - beta),
+      
+      # Income / tau (eq 8)
+      income_div_tau_01 = eq_rho_A_h_coeff_01 * (1 - l_i) * bua_01_pop^(sigma + beta),
+      income_div_tau_21 = eq_rho_A_h_coeff_21 * (1 - l_i) * bua_21_pop^(sigma + beta),
+      
+      # Consumption / tau (eq 22)
+      cons_coeff = (gamma + theta - sigma - beta) / ((sigma + beta) * (gamma + 1)) *
+        geographic_constraint^gamma,
+      cons_div_tau_01 = cons_coeff * bua_01_pop^(gamma + theta),
+      cons_div_tau_21 = cons_coeff * bua_21_pop^(gamma + theta)
+    ) %>%
+    select(-eq_rho_A_h_coeff, -cons_coeff)
+  
+  # Impute tau from GDP growth
+  rgdp_multiple <- RGDP_PER_CAPITA$y2021 / RGDP_PER_CAPITA$y2001
+  
+  sum_income_pc_01_div_tau <- sum(cf_data$income_div_tau_01 * cf_data$bua_01_pop) / pop_totals$urb_01
+  sum_income_pc_21_div_tau <- sum(cf_data$income_div_tau_21 * cf_data$bua_21_pop) / pop_totals$urb_21
+  
+  tau_01 <- 1  # numeraire
+  tau_21 <- rgdp_multiple / (sum_income_pc_21_div_tau / sum_income_pc_01_div_tau)
+  
+  # Compute actual income and consumption values
+  cf_data <- cf_data %>%
+    mutate(
+      rho_A_h_01 = eq_rho_A_h_coeff_01 * tau_01,
+      rho_A_h_21 = eq_rho_A_h_coeff_21 * tau_21,
+      y_01 = income_div_tau_01 * tau_01,
+      y_21 = income_div_tau_21 * tau_21,
+      c_01 = cons_div_tau_01 * tau_01,
+      c_21 = cons_div_tau_21 * tau_21
+    ) %>%
+    select(-ends_with("_div_tau"), -starts_with("eq_rho_A_h_coeff"))
+  
+  # Rural income = consumption in marginal city
+  rur_01_income <- min(cf_data$c_01)
+  rur_21_income <- min(cf_data$c_21)
+  
+  # Rural productivity (from eq 11/40)
+  rur_01_prod <- rur_01_income / (pop_totals$rur_01^(-lambda))
+  rur_21_prod <- rur_21_income / (pop_totals$rur_21^(-lambda))
+  
+  # Add permitting costs and counterfactual indicator
+  cf_data <- cf_data %>%
+    mutate(
+      perm_01 = c_01 - rur_01_income,
+      perm_21 = c_21 - rur_21_income,
+      in_counterfact = as.integer(BUA22NM %in% cities_in_cf),
+      pop_21_incumb = pmin(bua_01_pop, bua_21_pop)
+    ) %>%
+    arrange(desc(bua_01_pop))
+  
+  rur_21_pop_incumb <- pop_totals$tot_21 - sum(cf_data$pop_21_incumb)
+  
+  list(
+    data = cf_data,
+    tau_01 = tau_01,
+    tau_21 = tau_21,
+    rur_01_income = rur_01_income,
+    rur_21_income = rur_21_income,
+    rur_01_prod = rur_01_prod,
+    rur_21_prod = rur_21_prod,
+    rur_21_pop_incumb = rur_21_pop_incumb,
+    params = params,
+    pop_totals = pop_totals
   )
 }
-#_______________________________________________________________________________
-# counterfactual & evaluation ####
-# _________________________ ####
 
-#_______________________________________________________________________________
-# function to prepare data for counterfactual & evaluation ####
-data_for_cf_fn = function(
-    og_dataset = agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints,
-    cities_in_counterfactual_f = cities_in_counterfactual,
-    beta_f = beta,
-    gamma_f = gamma,
-    lambda_f = lambda,
-    sigma_f = sigma,
-    theta_f = theta
-) {
+
+#-------------------------------------------------------------------------------
+# Compute counterfactual populations given permitting rate changes
+#-------------------------------------------------------------------------------
+compute_cf_populations <- function(cf_prep, perm_rate_cf) {
+  # perm_rate_cf is a vector of counterfactual permitting rates (same length as cf_prep$data)
   
-  #_______________________________________________________________________________
-  ## getting τ_t coefficient variables ####
-  # (rho A h) eqn coeff on τ_t (DP eqn 21 / τ_t)
-  replication = og_dataset %>%
-    rename(geographic_constraint = .data[[geographic_constraint]]) %>%
-    mutate(eq_rho_A_h_coeff_on_tau = (gamma_f + theta_f) / ( (sigma_f + beta_f) * (gamma_f + 1) ) ) %>%
-    # dividing by (1-l_i)
-    mutate(eq_rho_A_h_coeff_on_tau = eq_rho_A_h_coeff_on_tau * ((geographic_constraint)^(gamma_f)/(1-l_i))) %>%
-    # now calculating for each year
-    mutate(eq_rho_A_h_coeff_on_tau_01 = eq_rho_A_h_coeff_on_tau * (bua_01_pop)^(gamma_f + theta_f - sigma_f - beta_f)) %>%
-    mutate(eq_rho_A_h_coeff_on_tau_21 = eq_rho_A_h_coeff_on_tau * (bua_21_pop)^(gamma_f + theta_f - sigma_f - beta_f)) %>%
-    # dropping irrelevant var
-    select(-eq_rho_A_h_coeff_on_tau)
-  
-  # y_{it} / τ_t (DP eqn 8 / τ_t)
-  replication = replication %>%
-    # calculating for each year - multiplying by (1-l_i)
-    mutate(income01_div_tau = eq_rho_A_h_coeff_on_tau_01 * (1-l_i) * (bua_01_pop)^(sigma_f + beta_f) ) %>%
-    mutate(income21_div_tau = eq_rho_A_h_coeff_on_tau_21 * (1-l_i) * (bua_21_pop)^(sigma_f + beta_f) )
-  
-  # finding consumption c_{it} / τ_t (eqn 22 / τ_t) - same value for old and new model
-  replication = replication %>%
-    mutate(cons_coeff_on_tau = (gamma_f + theta_f - sigma_f - beta_f) / ( (sigma_f + beta_f) * (gamma_f + 1) ) ) %>%
-    mutate(cons_coeff_on_tau = cons_coeff_on_tau * (geographic_constraint)^(gamma_f) ) %>%
-    # now calculating for each year
-    mutate(cons_coeff_on_tau_01 = cons_coeff_on_tau * (bua_01_pop)^(gamma_f + theta_f)) %>%
-    mutate(cons_coeff_on_tau_21 = cons_coeff_on_tau * (bua_21_pop)^(gamma_f + theta_f)) %>%
-    # removing irrelevant variable
-    select(-cons_coeff_on_tau)
-  
-  # check no missing values
-  missing_vals = replication %>%
-    filter(if_any(everything(), is.na))
-  print("missing values: ")
-  print(missing_vals)
-  # none - good
-  
-  #_______________________________________________________________________________
-  ## imputing tau ####
-  
-  # UK real GDP per capita growth
-  # https://www.ons.gov.uk/economy/grossdomesticproductgdp/datasets/regionalgrossdomesticproductallnutslevelregions
-  # regionalgrossdomesticproductgdpbyallinternationalterritoriallevelitlregions - Copy.xlsx
-  rgdp01_cvm <<- 30316
-  rgdp21_cvm <<- 36465
-  
-  # gdp per capita factor increase
-  rgdp_multiple_01_to_21 <<- rgdp21_cvm/rgdp01_cvm
-  rgdp_multiple_01_to_21
-  # 1.20283
-  # much lower than US per capita growth 1980-2010:  1.658
-  
-  # normalise tau01_uk to 1
-  tau_01_uk <<- 1
-  
-  # real gdp_t+1 / real gdp_t = 
-  # (sum (total income in each city + rural areas)_t+1 / total pop_t+1) /
-  # (sum (total income in each city + rural areas)_t / total pop_t)
-  # = τ_t+1 (sum (total income in each city + rural areas div τ_t+1)_t+1 / total pop_t+1) /
-  # τ_t (sum (total income in each city + rural areas div τ_t)_t / total pop_t)
-  # summed variables
-  sum_tot_income01_div_tau = sum(replication$income01_div_tau * replication$bua_01_pop)
-  sum_tot_income21_div_tau = sum(replication$income21_div_tau * replication$bua_21_pop)
-  sum_income_pc_01_div_tau = sum_tot_income01_div_tau / urb_01_pop
-  sum_income_pc_21_div_tau = sum_tot_income21_div_tau / urb_21_pop
-  
-  # imputed value of tau
-  # note this imputation is the same in both the og and new methodology
-  tau_21_uk <<- rgdp_multiple_01_to_21 / (sum_income_pc_21_div_tau / sum_income_pc_01_div_tau)
-  # 1.175209 with DP's param values
-  # much lower than the 1.596 US value over 1980-2010 
-  
-  #_______________________________________________________________________________
-  ## calculating consumption, income values ####
-  consumption_income = replication %>%
-    # values for equation 21 (rho, A, h)
-    mutate(rho_A_h_01 = eq_rho_A_h_coeff_on_tau_01 * tau_01_uk) %>%
-    mutate(rho_A_h_21 = eq_rho_A_h_coeff_on_tau_21 * tau_21_uk) %>%
-    # dropping old columns that were coefficients on tau
-    select(-starts_with("eq_rho_A_h_coeff_on_tau")) %>%
-    # values for equation 8 - y_{it}
-    mutate(y_01 = income01_div_tau * tau_01_uk) %>%
-    mutate(y_21 = income21_div_tau * tau_21_uk) %>%
-    # dropping old columns that were coefficients on tau
-    select(-ends_with("_div_tau")) %>%
-    # values for equation 22 - c_{it}
-    mutate(c_01 = cons_coeff_on_tau_01 * tau_01_uk) %>%
-    mutate(c_21 = cons_coeff_on_tau_21 * tau_21_uk) %>%
-    # dropping old columns that were coefficients on tau
-    select(-starts_with("cons_coeff_on_tau")) %>%
-    
-    # calculating growth rate of income over that period
-    mutate(y_21_ovr_y_01 = y_21 / y_01)
-  
-  # generating variables for consumption as share of income
-  c_ovr_y_data = consumption_income %>%
+  cf_prep$data %>%
     mutate(
-      c_ovr_y_01 = c_01 / y_01,
-      c_ovr_y_21 = c_21 / y_21
+      perm_rate_counterfact = perm_rate_cf,
+      # DP's formula: N_cf = (perm_rate_cf / perm_rate_actual) * (N_21 - N_01) + N_01
+      bua_21_pop_counterfact = if_else(
+        in_counterfact == 1,
+        (perm_rate_counterfact / bua_perm_rate_01_21) * (bua_21_pop - bua_01_pop) + bua_01_pop,
+        as.numeric(bua_21_pop)
+      )
     )
-  assign("c_ovr_y_data", c_ovr_y_data, envir = .GlobalEnv)
-  
-  summed_c_y_vars = consumption_income %>%  
-    summarise(
-      c_all_cities_01 = sum(c_01),
-      c_all_cities_21 = sum(c_21),
-      y_all_cities_01 = sum(y_01),
-      y_all_cities_21 = sum(y_21)
-    )
-  c_ovr_y_01 <<- summed_c_y_vars$c_all_cities_01 / summed_c_y_vars$y_all_cities_01
-  print(paste0("c_ovr_y_01: ", c_ovr_y_01))
-  c_ovr_y_21 <<- summed_c_y_vars$c_all_cities_21 / summed_c_y_vars$y_all_cities_21
-  print(paste0("c_ovr_y_21: ", c_ovr_y_21))
-  
-  # rural income
-  # y_{rt} is income in marginal populated city (eqn 22)
-  # for marginal city, c_{it} = c_{rt} = y_{rt}
-  # so c_{rt} / y_{rt} = 1 for all t
-  rur_01_income <<- min(consumption_income$c_01)
-  rur_21_income <<- min(consumption_income$c_21)
-  
-  # calculating permitting costs and ordering by 2001 population
-  consumption_income_w_permitting_ordered = consumption_income %>%
-    mutate(perm_01 = c_01 - rur_01_income) %>%
-    mutate(perm_21 = c_21 - rur_21_income) %>%
-    # sorting by largest 2001 population first
-    arrange(desc(bua_01_pop)) %>%
-    # now generating variables permitting costs as share of income
-    mutate(perm_ovr_y_01 = perm_01 / y_01) %>%
-    mutate(perm_ovr_y_21 = perm_21 / y_21)
-  
-  # creating another version of dataset with only 2001 and 2021 values
-  consumption_income_w_permitting_01_21_only = consumption_income_w_permitting_ordered %>%
-    select(-contains("_11"))
-  
-  # rural productivity
-  # rearranging equation 40 <=> eqn 11
-  rur_01_prod <<- rur_01_income / ((rur_01_pop)^(-lambda_f))
-  rur_21_prod <<- rur_21_income / ((rur_21_pop)^(-lambda_f))
-  
-  start_counterfactual_data <<- consumption_income_w_permitting_01_21_only %>%
-    # creating indicator variable for the cities to be counterfactually evaluated
-    mutate(in_counterfact = as.integer(BUA22NM %in% cities_in_counterfactual_f)) %>%
-    # incumbent population in each city (min of old generation (i.e. 2001() pop or current (i.e. 2021) pop)
-    mutate(pop_21_incumb = pmin(bua_01_pop, bua_21_pop))
-  
-  # summarising permitting rate data
-  summary(start_counterfactual_data$bua_perm_rate_01_21)
-  
-  # incumbent rural population
-  rur_21_pop_incumb <<- tot_21_pop - sum(start_counterfactual_data$pop_21_incumb)
-  # note by construction, total incumbent population is the 2021 total UK pop 
-  
-  # end of function
 }
 
 
-#_______________________________________________________________________________
-# function to generate counterfactual income, consumption, etc. #####
-counterfactual_function = function(
-    counterfactual_dataset = start_counterfactual_data,
-    cities_in_counterfactual_vector = cities_in_counterfactual,
-    perm_rate_change_factor_vector = perm_rate_change_factor,
-    beta_f = beta,
-    gamma_f = gamma,
-    lambda_f = lambda,
-    sigma_f = sigma,
-    theta_f = theta,
-    # whether we're changing based on the factor list or not 
-    # if not, we increase permitting rates up to the 75th percentile value 
-    factor_change = TRUE,
-    # save results to global environment?
+#-------------------------------------------------------------------------------
+# Find marginal city (the while loop extracted)
+#-------------------------------------------------------------------------------
+find_marginal_city <- function(cf_data, cf_prep) {
+  params <- cf_prep$params
+  pop_totals <- cf_prep$pop_totals
+  tau_21 <- cf_prep$tau_21
+  rur_21_prod <- cf_prep$rur_21_prod
+  
+  gamma <- params$gamma
+  theta <- params$theta
+  sigma <- params$sigma
+  beta <- params$beta
+  
+  num_cities <- nrow(cf_data)
+  marginal_city_index <- num_cities
+  
+  for (i in 1:num_cities) {
+    # Compute counterfactual income and consumption
+    temp_data <- cf_data %>%
+      mutate(
+        pop_21_cf = bua_21_pop_counterfact,
+        y_21_cf = (y_21 / bua_21_pop^(sigma + beta)) * pop_21_cf^(sigma + beta),
+        c_21_cf = y_21_cf - (1 / (gamma + 1)) * tau_21 * geographic_constraint^gamma * pop_21_cf^(gamma + theta)
+      ) %>%
+      arrange(desc(c_21_cf)) %>%
+      mutate(city_order = row_number())
+    
+    # Cumulative urban population
+    pop_cum <- sum(temp_data$pop_21_cf)
+    
+    temp_data <- temp_data %>%
+      mutate(
+        pop_21_cf = if_else(pop_cum > pop_totals$tot_21 | city_order > marginal_city_index, NA_real_, pop_21_cf),
+        c_21_rural_threshold = rur_21_prod * (pop_totals$tot_21 - pop_cum)^(-params$lambda)
+      )
+    
+    # Check if marginal city is still viable
+    marg_city <- temp_data %>% filter(city_order == marginal_city_index)
+    
+    if (nrow(marg_city) == 0 || is.na(marg_city$pop_21_cf)) {
+      marginal_city_index <- marginal_city_index - 1
+    } else if (marg_city$c_21_rural_threshold > marg_city$c_21_cf) {
+      marginal_city_index <- marginal_city_index - 1
+    } else {
+      break
+    }
+    
+    if (marginal_city_index < 1) break
+  }
+  
+  # Final computation with correct marginal city
+  final_data <- cf_data %>%
+    mutate(
+      pop_21_cf = bua_21_pop_counterfact,
+      y_21_cf = (y_21 / bua_21_pop^(sigma + beta)) * pop_21_cf^(sigma + beta),
+      c_21_cf = y_21_cf - (1 / (gamma + 1)) * tau_21 * geographic_constraint^gamma * pop_21_cf^(gamma + theta)
+    ) %>%
+    arrange(desc(c_21_cf)) %>%
+    mutate(city_order = row_number()) %>%
+    mutate(
+      pop_21_cf = if_else(city_order > marginal_city_index, NA_real_, pop_21_cf),
+      y_21_cf = if_else(is.na(pop_21_cf), NA_real_, y_21_cf),
+      c_21_cf = if_else(is.na(pop_21_cf), NA_real_, c_21_cf)
+    )
+  
+  pop_cum_final <- sum(final_data$pop_21_cf, na.rm = TRUE)
+  c_21_rural_threshold <- rur_21_prod * (pop_totals$tot_21 - pop_cum_final)^(-params$lambda)
+  
+  final_data <- final_data %>%
+    mutate(
+      c_21_rural_threshold = c_21_rural_threshold,
+      perm_21_counterfact = c_21_cf - c_21_rural_threshold,
+      pop_21_incumb_counterfact = pmin(pop_21_cf, pop_21_incumb)
+    )
+  
+  list(
+    data = final_data,
+    marginal_city_index = marginal_city_index,
+    c_21_rur_counterfact = c_21_rural_threshold,
+    pop_21_rur_counterfact = pop_totals$tot_21 - pop_cum_final
+  )
+}
+
+
+#-------------------------------------------------------------------------------
+# Compute welfare metrics
+#-------------------------------------------------------------------------------
+compute_welfare_metrics <- function(marg_result, cf_prep) {
+  final_data <- marg_result$data
+  pop_totals <- cf_prep$pop_totals
+  rur_21_income <- cf_prep$rur_21_income
+  rur_21_pop_incumb <- cf_prep$rur_21_pop_incumb
+  c_21_rur_cf <- marg_result$c_21_rur_counterfact
+  pop_21_rur_cf <- marg_result$pop_21_rur_counterfact
+  
+  # Baseline (actual) values
+  y_21_baseline <- sum(final_data$y_21 * (final_data$bua_21_pop / pop_totals$tot_21), na.rm = TRUE) +
+    rur_21_income * (pop_totals$rur_21 / pop_totals$tot_21)
+  
+  c_21_baseline <- sum(final_data$c_21 * (final_data$pop_21_incumb / pop_totals$tot_21), na.rm = TRUE) +
+    rur_21_income * (rur_21_pop_incumb / pop_totals$tot_21)
+  
+  # Counterfactual values
+  y_21_cf <- sum(final_data$y_21_cf * (final_data$pop_21_cf / pop_totals$tot_21), na.rm = TRUE) +
+    c_21_rur_cf * (pop_21_rur_cf / pop_totals$tot_21)
+  
+  pop_21_rur_incumb_cf <- pop_totals$tot_21 - sum(final_data$pop_21_incumb_counterfact, na.rm = TRUE)
+  
+  c_21_cf <- sum(final_data$c_21_cf * (final_data$pop_21_incumb_counterfact / pop_totals$tot_21), na.rm = TRUE) +
+    c_21_rur_cf * (pop_21_rur_incumb_cf / pop_totals$tot_21)
+  
+  # Percentage changes
+  pct_chg_y <- 100 * (y_21_cf - y_21_baseline) / y_21_baseline
+  pct_chg_c <- 100 * (c_21_cf - c_21_baseline) / c_21_baseline
+  pct_chg_c_rur <- 100 * (c_21_rur_cf - rur_21_income) / rur_21_income
+  pct_chg_pop_rur <- 100 * (pop_21_rur_cf - pop_totals$rur_21) / pop_totals$rur_21
+  
+  list(
+    y_21_baseline = y_21_baseline,
+    c_21_baseline = c_21_baseline,
+    y_21_counterfactual = y_21_cf,
+    c_21_counterfactual = c_21_cf,
+    pct_chg_y_tot = pct_chg_y,
+    pct_chg_c_tot = pct_chg_c,
+    pct_chg_c_rur = pct_chg_c_rur,
+    pct_chg_pop_rur = pct_chg_pop_rur,
+    c_21_rur_counterfact = c_21_rur_cf,
+    pop_21_rur_counterfact = pop_21_rur_cf
+  )
+}
+
+
+#-------------------------------------------------------------------------------
+# Run single counterfactual scenario
+#-------------------------------------------------------------------------------
+run_single_counterfactual <- function(cf_prep, perm_rate_cf, factor_value, factor_change = TRUE) {
+  # Compute counterfactual populations
+  cf_pop_data <- compute_cf_populations(cf_prep, perm_rate_cf)
+  
+  # Find marginal city
+  marg_result <- find_marginal_city(cf_pop_data, cf_prep)
+  
+  # Compute welfare
+  welfare <- compute_welfare_metrics(marg_result, cf_prep)
+  
+  # Add city-level percentage changes
+  final_data <- marg_result$data %>%
+    mutate(
+      pct_chg_y = 100 * (y_21_cf - y_21) / y_21,
+      pct_chg_c = 100 * (c_21_cf - c_21) / c_21,
+      pct_chg_perm_rate = 100 * (perm_rate_counterfact - bua_perm_rate_01_21) / bua_perm_rate_01_21
+    )
+  
+  list(
+    data = final_data,
+    welfare = welfare,
+    params = cf_prep$params,
+    factor_value = factor_value,
+    factor_change = factor_change,
+    rur_21_income = cf_prep$rur_21_income
+  )
+}
+
+
+#-------------------------------------------------------------------------------
+# Main counterfactual function (orchestrates multiple scenarios)
+#-------------------------------------------------------------------------------
+run_counterfactuals <- function(
+    city_data,
+    cities_in_cf,
+    params,
+    pop_totals,
+    perm_rate_factors = NULL,
+    use_percentile = FALSE,
+    percentile = PERCENTILE_FOR_PERM_RATE,
     store_results = FALSE
 ) {
+  # Prepare base data
+  cf_prep <- prepare_counterfactual_data(city_data, cities_in_cf, params, pop_totals)
   
-  # Create empty lists to store results
-  cfact_fct_results_list = list()
+  results_list <- list()
   
-  # Calculate the 75th percentile of bua_perm_rate_01_21 if needed
-  percentile_75th_perm_rate = quantile(counterfactual_dataset$bua_perm_rate_01_21, 0.98)
-  
-  # Define factors to process
-  if (factor_change) {
-    # If using factor change, use the provided vector
-    factors_to_process = perm_rate_change_factor_vector
-  } else {
-    # If using 75th percentile, only need to do one calculation
-    # Just use a single placeholder factor (we'll ignore its value)
-    factors_to_process = 0  # Just a placeholder
+  if (use_percentile) {
+    # Single scenario: raise to percentile
+    pct_value <- quantile(cf_prep$data$bua_perm_rate_01_21, percentile)
+    
+    perm_rate_cf <- cf_prep$data %>%
+      mutate(
+        rate = if_else(
+          in_counterfact == 1,
+          pmax(bua_perm_rate_01_21, pct_value),
+          bua_perm_rate_01_21
+        )
+      ) %>%
+      pull(rate)
+    
+    result <- run_single_counterfactual(cf_prep, perm_rate_cf, pct_value, factor_change = FALSE)
+    results_list[["percentile"]] <- result
+    
+    message(sprintf("Percentile %.0f%% scenario: Δy=%.2f%%, Δc=%.2f%%",
+                    percentile * 100, result$welfare$pct_chg_y_tot, result$welfare$pct_chg_c_tot))
+    
+  } else if (!is.null(perm_rate_factors)) {
+    # Multiple scenarios: multiplicative factors
+    for (factor in perm_rate_factors) {
+      perm_rate_cf <- cf_prep$data %>%
+        mutate(
+          rate = if_else(
+            in_counterfact == 1,
+            bua_perm_rate_01_21 * (1 + factor),
+            bua_perm_rate_01_21
+          )
+        ) %>%
+        pull(rate)
+      
+      result <- run_single_counterfactual(cf_prep, perm_rate_cf, factor, factor_change = TRUE)
+      results_list[[as.character(factor)]] <- result
+      
+      message(sprintf("Factor %.0f%% scenario: Δy=%.2f%%, Δc=%.2f%%",
+                      factor * 100, result$welfare$pct_chg_y_tot, result$welfare$pct_chg_c_tot))
+    }
   }
   
-  # creating counterfactual 2001 permitting costs
-  for (factor in factors_to_process) {
-    print(paste0("start of factor: ", factor))
+  # Optionally save
+  if (store_results) {
+    save_counterfactual_results(results_list, cities_in_cf, params)
+  }
+  
+  results_list
+}
+
+
+#-------------------------------------------------------------------------------
+# Save results helper
+#-------------------------------------------------------------------------------
+save_counterfactual_results <- function(results_list, cities_in_cf, params) {
+  for (name in names(results_list)) {
+    result <- results_list[[name]]
     
-    if (factor_change) {
-      # Get the original values for the cities in the counterfactual
-      affected_cities = counterfactual_dataset %>% 
-        filter(in_counterfact == 1) %>%
-        select(BUA22NM, bua_perm_rate_01_21)
-      
-      print("Original permitting rates for affected cities:")
-      print(affected_cities)
-      
-      # Original calculation using factor - increase by factor amount
-      modified_counterfactual_dataset = counterfactual_dataset %>%
-        mutate(perm_rate_counterfact = ifelse(in_counterfact == 1,
-                                              bua_perm_rate_01_21 * (1 + factor),
-                                              bua_perm_rate_01_21))
-      
-      # Get the new values for the cities in the counterfactual
-      affected_cities_after = modified_counterfactual_dataset %>% 
-        filter(in_counterfact == 1) %>%
-        select(BUA22NM, bua_perm_rate_01_21, perm_rate_counterfact)
-      
-      print("New permitting rates for affected cities:")
-      print(affected_cities_after)
-    } else {
-      # Use 75th percentile when factor_change is FALSE
-      # Set perm_rate_counterfact to max of current value and 75th percentile
-      # Output the 75th percentile value being used
-      print(paste0("75th percentile of permitting rates: ", percentile_75th_perm_rate))
-      
-      # Get the original values for the cities in the counterfactual
-      affected_cities = counterfactual_dataset %>% 
-        filter(in_counterfact == 1) %>%
-        select(BUA22NM, bua_perm_rate_01_21)
-      
-      print("Original permitting rates for affected cities:")
-      print(affected_cities)
-      
-      # Apply the counterfactual permitting rates
-      modified_counterfactual_dataset = counterfactual_dataset %>%
-        mutate(perm_rate_counterfact = ifelse(in_counterfact == 1,
-                                              pmax(bua_perm_rate_01_21, percentile_75th_perm_rate),
-                                              bua_perm_rate_01_21))
-      
-      # Get the new values for the cities in the counterfactual
-      affected_cities_after = modified_counterfactual_dataset %>% 
-        filter(in_counterfact == 1) %>%
-        select(BUA22NM, bua_perm_rate_01_21, perm_rate_counterfact)
-      
-      print("New permitting rates for affected cities:")
-      print(affected_cities_after)
-    }
-    
-    # creating counterfactual population
-    # DP's stata code is 
-    # replace N = int((`permit_rate_cfact' / permit_rate_1980_2010) * (pop2010 - pop1980) + pop1980) if affected_cfact == 1
-    # where `permit_rate_...` is the total number of permits issued between 1980-2010 per initial (1980) housing unit 
-    modified_counterfactual_dataset = modified_counterfactual_dataset %>%
-      mutate(bua_21_pop_counterfact = ifelse(in_counterfact == 1,
-                                             (perm_rate_counterfact / bua_perm_rate_01_21)*(bua_21_pop - bua_01_pop) + bua_01_pop,
-                                             bua_21_pop))
-    
-    # dropping cities one-by-one to find the new marginal city ####
-    
-    # initialise counting variables
-    num_cities = nrow(modified_counterfactual_dataset)
-    marginal_city_index = num_cities
-    consumption_in_current_marginal_city_loop = rur_21_income
-    consumption_in_prev_marginal_city_loop = rur_21_income + 1
-    i = 1
-    
-    # looping to iteratively drop cities
-    while (i < num_cities && marginal_city_index > 1) {
-      
-      # initialising vectors
-      counterfactual_data_temp_marginal_city_calc = modified_counterfactual_dataset %>%
-        
-        # Reset counterfactual population
-        mutate(pop_21_counterfact_loop = bua_21_pop_counterfact) %>%
-        
-        # Counterfactual income and incumbent consumption
-        mutate(y_21_counterfact_loop = ( y_21 / (bua_21_pop)^(sigma_f+beta_f) ) * (pop_21_counterfact_loop)^(sigma_f+beta_f)) %>%
-        mutate(c_21_counterfact_loop = y_21_counterfact_loop - (1 / (gamma_f + 1)) * tau_21_uk * geographic_constraint^gamma_f * (pop_21_counterfact_loop^(gamma_f + theta_f))) %>%
-        
-        # Sort cities from highest to lowest incumbent consumption
-        arrange(desc(c_21_counterfact_loop)) %>%
-        mutate(city_order = rank(-c_21_counterfact_loop))
-      
-      # Cumulative urban population
-      pop_cum_21_counterfact_loop = sum(counterfactual_data_temp_marginal_city_calc$pop_21_counterfact_loop)
-      
-      counterfactual_data_temp_marginal_city_calc = counterfactual_data_temp_marginal_city_calc %>%
-        
-        # Urban population cannot exceed total pop and only cities above current marginal try are populated
-        mutate(pop_21_counterfact_loop = ifelse(pop_cum_21_counterfact_loop > tot_21_pop | city_order > marginal_city_index,
-                                                NA,
-                                                pop_21_counterfact_loop)) %>%
-        
-        # Calculate rural consumption if each city were the marginal one
-        mutate(c_21_rural_threshold = rur_21_prod * ((tot_21_pop - pop_cum_21_counterfact_loop)^(-lambda_f)))
-      
-      # Update incumbent consumption in marginal city
-      consumption_in_prev_marginal_city_loop = consumption_in_current_marginal_city_loop
-      consumption_in_current_marginal_city_loop = counterfactual_data_temp_marginal_city_calc %>%
-        filter(city_order == marginal_city_index) %>%
-        pull(c_21_counterfact_loop) %>%
-        mean(na.rm = TRUE)
-      
-      # print info
-      print(paste0("iteration: ",i,
-                   ", current cons: ",consumption_in_current_marginal_city_loop,
-                   ", prev cons: ",consumption_in_prev_marginal_city_loop,
-                   ", cities: ",marginal_city_index))
-      
-      # Update marginal city consumption
-      consumption_in_prev_marginal_city_loop = consumption_in_current_marginal_city_loop
-      
-      # if marginal city implies:
-      # urb pop > UK pop
-      # or rural cons > marg city cons
-      # take out 1 more city
-      marginal_city_index = with(counterfactual_data_temp_marginal_city_calc, {
-        if (is.na(pop_21_counterfact_loop[marginal_city_index])) {
-          marginal_city_index - 1
-        } else if (c_21_rural_threshold[marginal_city_index] > 
-                   c_21_counterfact_loop[marginal_city_index]) {
-          marginal_city_index - 1
-        } else {
-          0
-        }
-      })
-      
-      i = i + 1
-      
-      # end of while loop through cities and marginal consumption
-    }
-    
-    # set empty cities
-    counterfactual_data_temp_marginal_city_calc = counterfactual_data_temp_marginal_city_calc %>%
-      mutate(y_21_counterfact_loop = ifelse(is.na(pop_21_counterfact_loop),
-                                            NA,
-                                            y_21_counterfact_loop)) %>%
-      mutate(c_21_counterfact_loop = ifelse(is.na(pop_21_counterfact_loop),
-                                            NA,
-                                            c_21_counterfact_loop))
-    
-    # cf rural consumption per capita
-    # (rural income per capita = consumption)
-    # as per DP, cf rur cons is maximum rural consumption value based on marginal city
-    c_21_rur_counterfact = max(counterfactual_data_temp_marginal_city_calc$c_21_rural_threshold, na.rm = TRUE)
-    print(paste0("c_21_rur_counterfact: ", c_21_rur_counterfact))
-    print(paste0("rur_21_income: ", rur_21_income))
-    
-    # percentage change in consumption for rural and newcomers
-    pct_chg_c_rur = 100 * (c_21_rur_counterfact - rur_21_income) / rur_21_income
-    print(paste0("pct_chg_c_rur: ", pct_chg_c_rur))
-    
-    # cf permitting costs
-    counterfactual_data_temp_marginal_city_calc = counterfactual_data_temp_marginal_city_calc %>%
-      mutate(perm_21_counterfact = c_21_counterfact_loop - max(c_21_rural_threshold, na.rm = TRUE)) %>%
-      # counterfactual incumbent population 
-      # it's minimum of counterfactual and original incumbent pop
-      # pmin is the parallel minimum function that compares vectors elementwise, returning a vector of the smallest values at each position
-      mutate(pop_21_incumb_counterfact = pmin(pop_21_counterfact_loop, pop_21_incumb))
-    
-    # cf rural pop
-    # rural only
-    pop_cum_21_counterfact_loop = sum(counterfactual_data_temp_marginal_city_calc$pop_21_counterfact_loop, na.rm = TRUE)
-    pop_21_rur_counterfact = tot_21_pop - pop_cum_21_counterfact_loop
-    print(paste0("pop_21_rur_counterfact: ", pop_21_rur_counterfact))
-    
-    # includes urban newcomers
-    pop_cum_21_counterfact_loop = sum(counterfactual_data_temp_marginal_city_calc$pop_21_incumb_counterfact, na.rm = TRUE)
-    pop_21_rur_incumb_counterfact = tot_21_pop - pop_cum_21_counterfact_loop
-    
-    # percentage change in rural population
-    pct_chg_pop_rur = 100 * (pop_21_rur_counterfact - rur_21_pop) / rur_21_pop
-    print(paste0("pct_chg_pop_rur: ", pct_chg_pop_rur))
-    
-    ### baseline per-capita income and consumption ####
-    # weighted by population
-    y_21_baseline = with(counterfactual_data_temp_marginal_city_calc,
-                         sum(y_21 * (bua_21_pop / tot_21_pop), na.rm = TRUE)
-    ) + rur_21_income * (rur_21_pop / tot_21_pop)
-    print(paste0("y_21_baseline: ", y_21_baseline))
-    
-    # note consumption uses incumbent population that includes urban newcomers
-    # note by construction, *total* incumbent pop is just total UK pop in 2021
-    c_21_baseline = with(counterfactual_data_temp_marginal_city_calc,
-                         sum(c_21 * (pop_21_incumb / tot_21_pop), na.rm = TRUE)
-    ) + rur_21_income * (rur_21_pop_incumb / tot_21_pop)
-    print(paste0("c_21_baseline: ", c_21_baseline))
-    
-    ### counterfactual per-capita income (weighted by population) & %chg ####
-    y_21_counterfactual = with(counterfactual_data_temp_marginal_city_calc,
-                               sum(y_21_counterfact_loop * (pop_21_counterfact_loop / tot_21_pop), na.rm = TRUE)
-    ) + c_21_rur_counterfact * (pop_21_rur_counterfact / tot_21_pop)
-    print(paste0("y_21_counterfactual: ", y_21_counterfactual))
-    
-    # percentage change in income
-    pct_chg_y_tot = 100 * (y_21_counterfactual - y_21_baseline) / y_21_baseline
-    print(paste0("pct_chg_y_tot: ", pct_chg_y_tot))
-    
-    ### per-capita consumption (weighted by population) & %chg ####
-    # note consumption uses incumbent population that includes urban newcomers
-    # counterfactual
-    c_21_counterfactual = with(counterfactual_data_temp_marginal_city_calc,
-                               sum(c_21_counterfact_loop * (pop_21_incumb_counterfact / tot_21_pop), na.rm = TRUE)
-    ) + c_21_rur_counterfact * (pop_21_rur_incumb_counterfact / tot_21_pop)
-    print(paste0("c_21_counterfactual: ", c_21_counterfactual))
-    
-    # percentage change in consumption
-    pct_chg_c_tot = 100 * (c_21_counterfactual - c_21_baseline) / c_21_baseline
-    print(paste0("pct_chg_c_tot: ", pct_chg_c_tot))
-    
-    # generating variables for consumption as share of income (counterfactual)
-    cf_summed_c_y_vars = counterfactual_data_temp_marginal_city_calc %>%
-      summarise(
-        cf_c_all_cities_01 = sum(c_01),
-        cf_c_all_cities_21 = sum(c_21),
-        cf_y_all_cities_01 = sum(y_01),
-        cf_y_all_cities_21 = sum(y_21)
-      )
-    cf_c_ovr_y_01 <<- cf_summed_c_y_vars$cf_c_all_cities_01 / cf_summed_c_y_vars$cf_y_all_cities_01
-    print(paste0("cf_c_ovr_y_01: ", cf_c_ovr_y_01))
-    cf_c_ovr_y_21 <<- cf_summed_c_y_vars$cf_c_all_cities_21 / cf_summed_c_y_vars$cf_y_all_cities_21
-    print(paste0("cf_c_ovr_y_21: ", cf_c_ovr_y_21))
-    # always just 1 - (sigma + beta)/(gamma + theta)
-    
-    # percentage changes for individual cities
-    counterfactual_data_temp_marginal_city_calc = counterfactual_data_temp_marginal_city_calc %>%
-      mutate(pct_chg_y = 100 * (y_21_counterfact_loop - y_21) / y_21) %>%
-      mutate(pct_chg_c = 100 * (c_21_counterfact_loop - c_21) / c_21) %>%
-      mutate(pct_chg_perm_rate = 100 * (perm_rate_counterfact - bua_perm_rate_01_21) / bua_perm_rate_01_21)
-    
-    # Track results in global tibble
-    append_counterfactual_results(
-      sigma_f = sigma_f, 
-      beta_f = beta_f, 
-      gamma_f = gamma_f, 
-      theta_f = theta_f, 
-      lambda_f = lambda_f,
-      factor_change = factor_change, 
-      factor_value = ifelse(factor_change, factor, percentile_75th_perm_rate),
-      cities_in_counterfactual_vector = cities_in_counterfactual_vector,
-      c_21_rur_counterfact = c_21_rur_counterfact,
-      rur_21_income = rur_21_income,
-      pop_21_rur_counterfact = pop_21_rur_counterfact,
-      pct_chg_pop_rur = pct_chg_pop_rur,
-      y_21_baseline = y_21_baseline, 
-      c_21_baseline = c_21_baseline,
-      y_21_counterfactual = y_21_counterfactual, 
-      pct_chg_y_tot = pct_chg_y_tot,
-      c_21_counterfactual = c_21_counterfactual,
-      pct_chg_c_tot= pct_chg_c_tot,
-      cf_c_ovr_y_01 = cf_c_ovr_y_01,
-      cf_c_ovr_y_21 = cf_c_ovr_y_21,
-      pct_chg_c_rur = pct_chg_c_rur
-    )
-    
-    # Store results for this factor
-    cfact_fct_results_list[[as.character(factor)]] = list(
-      sigma_f = sigma_f, 
-      beta_f = beta_f, 
-      gamma_f = gamma_f, 
-      theta_f = theta_f, 
-      lambda_f = lambda_f,
-      counterfactual_data_temp_marginal_city_calc = counterfactual_data_temp_marginal_city_calc,
-      cities_in_counterfactual_vector = cities_in_counterfactual_vector,
-      c_21_rur_counterfact = c_21_rur_counterfact,
-      rur_21_income = rur_21_income,
-      pop_21_rur_counterfact = pop_21_rur_counterfact,
-      pct_chg_pop_rur = pct_chg_pop_rur,
-      y_21_baseline = y_21_baseline, 
-      c_21_baseline = c_21_baseline,
-      y_21_counterfactual = y_21_counterfactual, 
-      pct_chg_y_tot = pct_chg_y_tot,
-      c_21_counterfactual = c_21_counterfactual,
-      pct_chg_c_tot= pct_chg_c_tot,
-      cf_c_ovr_y_01 = cf_c_ovr_y_01,
-      cf_c_ovr_y_21 = cf_c_ovr_y_21,
-      pct_chg_c_rur = pct_chg_c_rur
-    )
-    
-    ### Store results in presentable table ####
-    #___________________________________________________________________________
-    presentable_table = counterfactual_data_temp_marginal_city_calc %>%
+    # Create presentable table
+    tbl <- result$data %>%
       filter(in_counterfact == 1) %>%
-      select(c(BUA22NM,
-               pct_chg_perm_rate,
-               bua_21_pop,
-               bua_21_pop_counterfact,
-               pct_chg_y,
-               pct_chg_c
-      )) %>%
-      # dividing by 100 as excel/sheets, when formatting x into percentage, 
-      # treats the conversion as 100x%
-      mutate(
-        pct_chg_perm_rate = pct_chg_perm_rate/100,
-        pct_chg_y = pct_chg_y/100,
-        pct_chg_c = pct_chg_c/100
-      ) %>%
-      # add new column for increase in consumption of newcomers (formerly rural ppl)
-      mutate(pct_chg_c_newcomers = pct_chg_c_rur/100)
+      select(BUA22NM, pct_chg_perm_rate, bua_21_pop, bua_21_pop_counterfact, pct_chg_y, pct_chg_c) %>%
+      mutate(across(starts_with("pct_"), ~ . / 100)) %>%
+      mutate(pct_chg_c_newcomers = result$welfare$pct_chg_c_rur / 100)
     
-    # Create a new row for rural areas
-    rural_row = tibble(
+    # Add rural row
+    tbl <- bind_rows(tbl, tibble(
       BUA22NM = "Rural areas",
       pct_chg_perm_rate = NA,
-      bua_21_pop = rur_21_pop,
-      bua_21_pop_counterfact = pop_21_rur_counterfact,
-      pct_chg_y = pct_chg_c_rur/100,
+      bua_21_pop = result$welfare$pop_21_rur_counterfact,
+      bua_21_pop_counterfact = result$welfare$pop_21_rur_counterfact,
+      pct_chg_y = result$welfare$pct_chg_c_rur / 100,
       pct_chg_c = NA,
       pct_chg_c_newcomers = NA
+    ))
+    
+    # Save
+    filename <- sprintf(
+      "Outputs/tbl_%s_cf_%d_cities_sb%.0f_gt%.0f_l%.0f.csv",
+      if (result$factor_change) paste0("fact_", result$factor_value) else "q98",
+      length(cities_in_cf),
+      (params$sigma + params$beta) * 100,
+      (params$gamma + params$theta) * 100,
+      params$lambda * 100
     )
     
-    # Combine the original table with the new row
-    presentable_table = bind_rows(presentable_table, rural_row)
-    
-    # end of for loop through cost reduction factors
-    print(paste0("end of factor: ", factor))
-    
-    # Save to global environment
-    if (store_results) {
-      if (factor_change) {
-        assign(
-          paste0(
-            "fact_",factor,
-            "_cf_",
-            length(cities_in_counterfactual_vector),"_cities_",
-            "_sb",(sigma_f+beta_f)*100,
-            "_gt",(gamma_f+theta_f)*100,
-            "_l",lambda_f*100), 
-          cfact_fct_results_list, 
-          envir = .GlobalEnv
-        )
-        
-        assign(
-          paste0(
-            "tbl_fact_",factor,
-            "_cf_",
-            length(cities_in_counterfactual_vector),"_cities_",
-            "_sb",(sigma_f+beta_f)*100,
-            "_gt",(gamma_f+theta_f)*100,
-            "_l",lambda_f*100), 
-          presentable_table, 
-          envir = .GlobalEnv
-        )    
-        
-        write_csv(presentable_table,
-                  paste0(
-                    "Outputs/tbl_fact_",factor,
-                    "_cf_",
-                    length(cities_in_counterfactual_vector),"_cities_",
-                    "_sb",(sigma_f+beta_f)*100,
-                    "_gt",(gamma_f+theta_f)*100,
-                    "_l",lambda_f*100,
-                    ".csv"
-                  ))
-      } else {
-        assign(
-          paste0(
-            "q75_cf_",
-            length(cities_in_counterfactual_vector),"_cities_",
-            "_sb",(sigma_f+beta_f)*100,
-            "_gt",(gamma_f+theta_f)*100,
-            "_l",lambda_f*100),
-          cfact_fct_results_list, 
-          envir = .GlobalEnv
-        )
-        
-        assign(
-          paste0(
-            "tbl_q75_cf_",
-            length(cities_in_counterfactual_vector),"_cities_",
-            "_sb",(sigma_f+beta_f)*100,
-            "_gt",(gamma_f+theta_f)*100,
-            "_l",lambda_f*100),
-          presentable_table, 
-          envir = .GlobalEnv
-        )
-        
-        write_csv(presentable_table,
-                  paste0(
-                    "Outputs/tbl_q75_cf_",
-                    length(cities_in_counterfactual_vector),"_cities_",
-                    "_sb",(sigma_f+beta_f)*100,
-                    "_gt",(gamma_f+theta_f)*100,
-                    "_l",lambda_f*100,
-                    ".csv"
-                  ))
-      }
-    }
+    write_csv(tbl, filename)
   }
-  
-  # end of function
 }
 
 
-#_______________________________________________________________________________
-# iterating over parameter values ####
-# we can vary the parameters as robustness checks
+#===============================================================================
+# RUN ANALYSIS
+#===============================================================================
 
-# varying size of increase in permitting rate
-perm_rate_change_factor = c(0.05,
-                            0.1,
-                            0.25,
-                            0.3,
-                            0.5)
-
-# varying cities to be counterfactually evaluated
-# cities to iterate over
-cities_iteration = list(
-  agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints$BUA22NM[1:10],
-  agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints$BUA22NM[1:5], # top 5
-  agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints$BUA22NM[1:2], # top 2 (London, Birmingham)
-  agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints$BUA22NM[1], # london only
-  c("Greater London", "Oxford", "Cambridge (Cambridge)")
+# Population totals (computed during data construction or loading)
+pop_totals <- list(
+  tot_01 = POP_ENGLAND$y2001,
+  tot_21 = POP_ENGLAND$y2021,
+  urb_01 = urb_01_pop,
+  urb_21 = urb_21_pop,
+  rur_01 = rur_01_pop,
+  rur_21 = rur_21_pop
 )
 
-cities_in_counterfactual = cities_iteration[[1]]
-
-# DP do:
-# γ+θ = 0.09,0.11,0.13
-# σ+β = 0.04,0.06,0.08
-# note second order condition restrictions:
-# γ + θ − σ − β > 0 and σ + β > 0
-# using the same combinations as D+P
-
-alt_parameter_options = tibble(
-  sigma_options = c(
-    0.02, 0.03, 0.04, 0.02, 0.03, 0.02, 0.03, 0.04
-  ),
-  beta_options = c(
-    0.02, 0.03, 0.04, 0.02, 0.03, 0.02, 0.03, 0.04
-  ),
-  gamma_options = c(
-    0.06, 0.06, 0.06, 0.07, 0.07, 0.08, 0.08, 0.08
-  ),
-  theta_options = c(
-    0.03, 0.03, 0.03, 0.04, 0.04, 0.05, 0.05, 0.05
-  )
+# Default parameters
+params_default <- list(
+  gamma = PARAMS_USA$gamma,
+  theta = PARAMS_USA$theta,
+  sigma = PARAMS_USA$sigma,
+  beta = PARAMS_USA$beta,
+  lambda = PARAMS_USA$lambda
 )
 
-# Create a global tibble to store results
-if (!exists("counterfactual_results_tibble")) {
-  counterfactual_results_tibble = tibble(
-    # Parameters
-    sigma = numeric(),
-    beta = numeric(), 
-    gamma = numeric(),
-    theta = numeric(),
-    lambda = numeric(),
-    factor_change = logical(),
-    factor_value = numeric(),
-    cities_count = numeric(),
-    cities_list = list(),
-    
-    # Results
-    c_21_rur_counterfact = numeric(),
-    rur_21_income = numeric(),
-    pop_21_rur_counterfact = numeric(),
-    pct_chg_pop_rur = numeric(),
-    y_21_baseline = numeric(), 
-    c_21_baseline = numeric(),
-    y_21_counterfactual = numeric(),
-    pct_chg_y_tot = numeric(), 
-    c_21_counterfactual = numeric(),
-    pct_chg_c_tot= numeric(),
-    cf_c_ovr_y_01 = numeric(),
-    cf_c_ovr_y_21 = numeric(),
-    pct_chg_c_rur = numeric()
-  )
-}
-
-# Function to append results to global tibble
-append_counterfactual_results = function(
-    sigma_f, 
-    beta_f, 
-    gamma_f, 
-    theta_f, 
-    lambda_f,
-    factor_change, 
-    factor_value,
-    cities_in_counterfactual_vector,
-    c_21_rur_counterfact,
-    rur_21_income,
-    pop_21_rur_counterfact,
-    pct_chg_pop_rur,
-    y_21_baseline, 
-    c_21_baseline,
-    y_21_counterfactual, 
-    pct_chg_y_tot,
-    c_21_counterfactual,
-    pct_chg_c_tot,
-    cf_c_ovr_y_01,
-    cf_c_ovr_y_21,
-    pct_chg_c_rur
-) {
-  
-  # Create new row
-  new_row = tibble(
-    sigma = sigma_f,
-    beta = beta_f,
-    gamma = gamma_f,
-    theta = theta_f,
-    lambda = lambda_f,
-    factor_change = factor_change,
-    factor_value = factor_value,
-    cities_count = length(cities_in_counterfactual_vector),
-    cities_list = list(cities_in_counterfactual_vector),
-    c_21_rur_counterfact = c_21_rur_counterfact,
-    rur_21_income = rur_21_income,
-    pop_21_rur_counterfact = pop_21_rur_counterfact,
-    pct_chg_pop_rur = pct_chg_pop_rur,
-    y_21_baseline = y_21_baseline, 
-    c_21_baseline = c_21_baseline,
-    y_21_counterfactual = y_21_counterfactual, 
-    pct_chg_y_tot = pct_chg_y_tot,
-    c_21_counterfactual = c_21_counterfactual,
-    pct_chg_c_tot= pct_chg_c_tot,
-    cf_c_ovr_y_01 = cf_c_ovr_y_01,
-    cf_c_ovr_y_21 = cf_c_ovr_y_21,
-    pct_chg_c_rur = pct_chg_c_rur
-  )
-  
-  # Append to global tibble
-  counterfactual_results_tibble <<- bind_rows(counterfactual_results_tibble, new_row)
-  
-  # Print basic results
-  message(sprintf("Row added to results tibble: σ+β=%.2f, γ+θ=%.2f, cities=%d", 
-                  sigma_f+beta_f, gamma_f+theta_f, length(cities_in_counterfactual_vector)))
-  message(paste0("Consumption change: ", pct_chg_c_rur))
-  
-  return(invisible(NULL))
-}
-
-#_______________________________________________________________________________
-## main parameter options - DP's original ####
-data_for_cf_fn(
-  og_dataset = agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints,
-  cities_in_counterfactual_f = cities_in_counterfactual,
-  beta_f = beta_usa,
-  gamma_f = gamma_usa,
-  lambda_f = lambda_usa,
-  sigma_f = sigma_usa,
-  theta_f = theta_usa
+# Cities to evaluate
+cities_sets <- list(
+  top_10 = city_data$BUA22NM[1:10],
+  top_5 = city_data$BUA22NM[1:5],
+  top_2 = city_data$BUA22NM[1:2],
+  london_only = city_data$BUA22NM[1],
+  oxbridge = c("Greater London", "Oxford", "Cambridge (Cambridge)")
 )
 
-write_csv(start_counterfactual_data,
-          "Outputs/dp_original_params_counterfactual_data.csv")
+#-------------------------------------------------------------------------------
+# Main analysis with default parameters
+#-------------------------------------------------------------------------------
 
-dp_original_params_counterfactual_data = start_counterfactual_data
+message("\n=== Running main counterfactual with default parameters ===\n")
 
-counterfactual_function(
-  counterfactual_dataset = start_counterfactual_data,
-  cities_in_counterfactual_vector = cities_in_counterfactual,
-  perm_rate_change_factor_vector = perm_rate_change_factor,
-  beta_f = beta_usa,
-  gamma_f = gamma_usa,
-  lambda_f = lambda_usa,
-  sigma_f = sigma_usa,
-  theta_f = theta_usa,
-  # whether we're changing based on the factor list or not 
-  # if not, we increase permitting rates up to the 75th percentile value 
-  factor_change = FALSE,
-  # save results to global environment?
+# Prepare base data (save for plotting)
+cf_prep_main <- prepare_counterfactual_data(city_data, cities_sets$top_10, params_default, pop_totals)
+write_csv(cf_prep_main$data, "Outputs/dp_original_params_counterfactual_data.csv")
+
+# Run with percentile approach
+results_main <- run_counterfactuals(
+  city_data = city_data,
+  cities_in_cf = cities_sets$top_10,
+  params = params_default,
+  pop_totals = pop_totals,
+  use_percentile = TRUE,
   store_results = TRUE
 )
 
-#_______________________________________________________________________________
-## original parameters - varying cities ####
-for (i in cities_iteration) {
-  data_for_cf_fn(
-    og_dataset = agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints,
-    cities_in_counterfactual_f = i,
-    beta_f = beta_usa,
-    gamma_f = gamma_usa,
-    lambda_f = lambda_usa,
-    sigma_f = sigma_usa,
-    theta_f = theta_usa
-  )
-  
-  counterfactual_function(
-    counterfactual_dataset = start_counterfactual_data,
-    cities_in_counterfactual_vector = i,
-    perm_rate_change_factor_vector = perm_rate_change_factor,
-    beta_f = beta_usa,
-    gamma_f = gamma_usa,
-    lambda_f = lambda_usa,
-    sigma_f = sigma_usa,
-    theta_f = theta_usa,
-    # whether we're changing based on the factor list or not 
-    # if not, we increase permitting rates up to the 75th percentile value 
-    factor_change = FALSE,
-    # save results to global environment?
+#-------------------------------------------------------------------------------
+# Vary cities
+#-------------------------------------------------------------------------------
+
+message("\n=== Varying cities ===\n")
+
+results_by_cities <- map(cities_sets, function(cities) {
+  run_counterfactuals(
+    city_data = city_data,
+    cities_in_cf = cities,
+    params = params_default,
+    pop_totals = pop_totals,
+    use_percentile = TRUE,
     store_results = TRUE
   )
-}
+})
 
-#_______________________________________________________________________________
-## original parameters - using cost reduction factors ####
-data_for_cf_fn(
-  og_dataset = agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints,
-  cities_in_counterfactual_f = cities_in_counterfactual,
-  beta_f = beta_usa,
-  gamma_f = gamma_usa,
-  lambda_f = lambda_usa,
-  sigma_f = sigma_usa,
-  theta_f = theta_usa
-)
+#-------------------------------------------------------------------------------
+# Vary factors
+#-------------------------------------------------------------------------------
 
-counterfactual_function(
-  counterfactual_dataset = start_counterfactual_data,
-  cities_in_counterfactual_vector = cities_in_counterfactual,
-  perm_rate_change_factor_vector = perm_rate_change_factor,
-  beta_f = beta_usa,
-  gamma_f = gamma_usa,
-  lambda_f = lambda_usa,
-  sigma_f = sigma_usa,
-  theta_f = theta_usa,
-  # whether we're changing based on the factor list or not 
-  # if not, we increase permitting rates up to the 75th percentile value 
-  factor_change = TRUE,
-  # save results to global environment?
+message("\n=== Varying permitting rate factors ===\n")
+
+results_by_factor <- run_counterfactuals(
+  city_data = city_data,
+  cities_in_cf = cities_sets$top_10,
+  params = params_default,
+  pop_totals = pop_totals,
+  perm_rate_factors = PERM_RATE_CHANGE_FACTORS,
   store_results = TRUE
 )
 
+#-------------------------------------------------------------------------------
+# Vary parameters
+#-------------------------------------------------------------------------------
 
-#_______________________________________________________________________________
-## varying sigma, beta, gamma, theta #####
+message("\n=== Varying model parameters ===\n")
 
-for (param_idx in 1:nrow(alt_parameter_options)) {
-  # adjusting parameters
-  gamma = alt_parameter_options$gamma_options[param_idx]
-  theta = alt_parameter_options$theta_options[param_idx]
-  sigma = alt_parameter_options$sigma_options[param_idx]
-  beta = alt_parameter_options$beta_options[param_idx]
-  
-  data_for_cf_fn(
-    og_dataset = agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints,
-    cities_in_counterfactual_f = cities_in_counterfactual,
-    beta_f = beta,
-    gamma_f = gamma,
-    lambda_f = lambda_usa,
-    sigma_f = sigma,
-    theta_f = theta
+results_by_params <- map(1:nrow(ALT_PARAMS), function(i) {
+  alt_params <- list(
+    gamma = ALT_PARAMS$gamma[i],
+    theta = ALT_PARAMS$theta[i],
+    sigma = ALT_PARAMS$sigma[i],
+    beta = ALT_PARAMS$beta[i],
+    lambda = PARAMS_USA$lambda
   )
   
-  counterfactual_function(
-    counterfactual_dataset = start_counterfactual_data,
-    cities_in_counterfactual_vector = cities_in_counterfactual,
-    perm_rate_change_factor_vector = perm_rate_change_factor,
-    beta_f = beta,
-    gamma_f = gamma,
-    lambda_f = lambda_usa,
-    sigma_f = sigma,
-    theta_f = theta,
-    # whether we're changing based on the factor list or not 
-    # if not, we increase permitting rates up to the 75th percentile value 
-    factor_change = FALSE,
-    # save results to global environment?
+  run_counterfactuals(
+    city_data = city_data,
+    cities_in_cf = cities_sets$top_10,
+    params = alt_params,
+    pop_totals = pop_totals,
+    use_percentile = TRUE,
     store_results = TRUE
   )
-  
-}
-
-# viewing final results
-view(counterfactual_results_tibble)
-
-# consumption as share of income
-# https://www.perplexity.ai/search/consumption-as-share-of-income-My2BWGVtQGiqmyN8TRgE6g
-# https://ifs.org.uk/publications/measuring-living-standards-income-and-consumption-evidence-uk-1
-# https://www.stats.gov.cn/english/PressRelease/202410/t20241025_1957142.html
-# https://www.bea.gov/system/files/papers/BEA-WP2023-1.pdf
+})
 
 
-# replicating results of DP's original paper ####
-## plots ####
-top_10_buas = dp_original_params_counterfactual_data %>%
+#===============================================================================
+# PLOTS AND REGRESSIONS
+#===============================================================================
+
+message("\n=== Generating plots and regressions ===\n")
+
+plot_data <- cf_prep_main$data
+
+top_10_buas <- plot_data %>%
   arrange(desc(bua_21_pop)) %>%
   slice_head(n = 10)
 
-perm_rate_vs_city_pop = ggplot(dp_original_params_counterfactual_data, 
-                               aes(x = bua_21_pop, y = 1/bua_perm_rate_01_21)) +
+# Plot 1: Permitting rate vs city population
+perm_rate_vs_city_pop <- ggplot(plot_data, aes(x = bua_21_pop, y = 1/bua_perm_rate_01_21)) +
   geom_point(alpha = 0.5) +
-  geom_smooth(method = "lm", color = "blue", se = F) +
+  geom_smooth(method = "lm", color = "blue", se = FALSE) +
   geom_text_repel(
-    data = top_10_buas, 
+    data = top_10_buas,
     aes(label = BUA22NM),
-    size = 3.5,
-    box.padding = 0.5,
-    point.padding = 0.2,
-    force = 10
+    size = 3.5, box.padding = 0.5, point.padding = 0.2, force = 10
   ) +
   labs(
-    # title = "Planning regulations and city population",
     x = "2021 population (log scale)",
-    y = "Reciprocal of permitting rate \n(2001-2021)"
+    y = "Reciprocal of permitting rate\n(2001-2021)"
   ) +
   theme_minimal() +
   scale_x_log10()
 
-geog_constr_vs_perm_rate = ggplot(dp_original_params_counterfactual_data, 
-                                  aes(x = 1 - 1/geographic_constraint, y = 1/bua_perm_rate_01_21)) +
+# Plot 2: Geographic constraint vs permitting rate
+geog_constr_vs_perm_rate <- ggplot(plot_data, aes(x = 1 - 1/geographic_constraint, y = 1/bua_perm_rate_01_21)) +
   geom_point(alpha = 0.5) +
-  geom_smooth(method = "lm", color = "blue", se = F) +
+  geom_smooth(method = "lm", color = "blue", se = FALSE) +
   geom_text_repel(
-    data = top_10_buas, 
+    data = top_10_buas,
     aes(label = BUA22NM),
-    size = 3.5,
-    box.padding = 0.5,
-    point.padding = 0.2,
-    force = 10
+    size = 3.5, box.padding = 0.5, point.padding = 0.2, force = 10
   ) +
   labs(
-    # title = "Planning regulations and geographical constraints",
     x = "Estimated % geographically-constrained land (log scale)",
-    y = "Reciprocal of permitting rate \n(2001-2021)"
+    y = "Reciprocal of permitting rate\n(2001-2021)"
   ) +
   theme_minimal() +
   scale_x_log10(labels = scales::percent)
 
-print(perm_rate_vs_city_pop)
-print(geog_constr_vs_perm_rate)
-ggsave("Outputs/perm_rate_vs_city_pop.png", 
-       perm_rate_vs_city_pop,
-       units = "cm",
-       width = 16,
-       height = 12,
-       dpi = 320)
-ggsave("Outputs/geog_constr_vs_perm_rate.png", 
-       geog_constr_vs_perm_rate,
-       units = "cm",
-       width = 16,
-       height = 12,
-       dpi = 320)
+ggsave("Outputs/perm_rate_vs_city_pop.png", perm_rate_vs_city_pop, units = "cm", width = 16, height = 12, dpi = 320)
+ggsave("Outputs/geog_constr_vs_perm_rate.png", geog_constr_vs_perm_rate, units = "cm", width = 16, height = 12, dpi = 320)
 
-## regressions ####
-# Permitting rate vs log population
-perm_rate_vs_city_pop_reg = lm(I(1/bua_perm_rate_01_21) ~ log(bua_21_pop), data = dp_original_params_counterfactual_data)
+# Regressions
+reg1 <- lm(I(1/bua_perm_rate_01_21) ~ log(bua_21_pop), data = plot_data)
+reg2 <- lm(I(1/bua_perm_rate_01_21) ~ log(1 - 1/geographic_constraint), data = plot_data)
 
-# Permitting rate vs log share of geographically constrained land
-geog_constr_vs_perm_rate_reg = lm(I(1/bua_perm_rate_01_21) ~ log(1 - 1/geographic_constraint), data = dp_original_params_counterfactual_data)
+stargazer(
+  reg1, reg2,
+  title = "Empirically testing model predictions",
+  dep.var.labels = "Reciprocal of permitting rate (2001-2021)",
+  covariate.labels = c("Log population", "Log \\% of geographically constrained land", "Constant"),
+  align = TRUE,
+  model.numbers = TRUE,
+  label = "tab:reg_tab",
+  type = "latex",
+  out = "Outputs/regression_results.tex"
+)
 
-# outputting models
-summary_perm_rate_vs_city_pop_reg = summary(perm_rate_vs_city_pop_reg)
-summary_geog_constr_vs_perm_rate_reg = summary(geog_constr_vs_perm_rate_reg)
-summary_perm_rate_vs_city_pop_reg
-summary_geog_constr_vs_perm_rate_reg
-
-# creating latex table
-stargazer(perm_rate_vs_city_pop_reg, 
-          geog_constr_vs_perm_rate_reg, 
-          title = "Empirically testing model predictions",
-          # column.labels = c("Log 2021 Population", "Log Geographic Constraint"),
-          column.separate = c(1, 1),
-          dep.var.labels = "Reciprocal of permitting rate (2001-2021)",
-          covariate.labels = c("Log population", "Log \\% of geographically constrained land", "Constant"),
-          align = TRUE,
-          model.numbers = TRUE,
-          label = "tab:reg tab",
-          type = "latex",
-          out = "Outputs/regression_results.tex")
-
+message("\n=== Analysis complete ===\n")
