@@ -9,6 +9,8 @@
 
 rm(list = ls())
 
+setwd("/Users/joshmuthu/urb_growth_eng/2100282 EC331 - Code")
+
 #_______________________________________________________________________________
 # PACKAGES ####
 #_______________________________________________________________________________
@@ -789,6 +791,7 @@ run_counterfactuals <- function(
   if (use_percentile) {
     # Single scenario: raise to percentile
     pct_value <- quantile(cf_prep$data$bua_perm_rate_01_21, percentile)
+    message(sprintf("Permitting rate at %.0f%% percentile: %.6f", percentile * 100, pct_value))
     
     perm_rate_cf <- cf_prep$data %>%
       mutate(
@@ -926,6 +929,15 @@ results_main <- run_counterfactuals(
   pop_totals = pop_totals,
   use_percentile = TRUE,
   store_results = TRUE
+)
+
+# save metadata
+write_csv(
+  tibble(
+    percentile_used = PERCENTILE_FOR_PERM_RATE,
+    perm_rate_at_percentile = results_main$percentile$factor_value
+  ),
+  "Outputs/counterfactual_metadata.csv"
 )
 
 #-------------------------------------------------------------------------------
