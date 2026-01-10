@@ -90,6 +90,11 @@ PERM_DATA_END_YEAR <- 2021
 # Counterfactual parameters
 PERCENTILE_FOR_PERM_RATE <- 0.98
 
+# Austin, TX comparison data
+# Source: https://data.austintexas.gov/Building-and-Development/New-Residential-Units-Summary-by-Calendar-Year-and/2y79-8diw
+AUSTIN_DATA_FILE <- "Data/Issued_Construction_Permits_20250927.csv"
+AUSTIN_2001_POP <- 669693
+
 # Permitting rate change factors for sensitivity analysis
 PERM_RATE_CHANGE_FACTORS <- c(0.05, 0.1, 0.25, 0.3, 0.5)
 
@@ -146,6 +151,47 @@ ALT_PARAMS <- tibble(
   theta = c(0.03, 0.03, 0.03, 0.04, 0.04, 0.05, 0.05, 0.05)
 )
 
+#_______________________________________________________________________________
+# AUSTIN PERMITTING RATE CALCULATION ####
+#_______________________________________________________________________________
+
+calculate_austin_perm_rate <- function(filepath = AUSTIN_DATA_FILE) {
+  
+  meaningful_residence_names <- c(
+    "residence", "condo", "duplex", "apartment", "family", "home", 
+    "residential", "dwelling", "finish-out", "finish out", "story", "stories"
+  )
+  meaningful_pattern <- paste(c(meaningful_residence_names, paste0(meaningful_residence_names, "s")), collapse = "|")
+  
+  other_residence_names <- c("res", "apt", "hm", "sty", "stry")
+  other_pattern <- paste(paste0("\\b", c(other_residence_names, paste0(other_residence_names, "s")), "\\b"), collapse = "|")
+  
+  delete_conditions <- c("clubhouse", "new garage", "new parking garage", "maintenance", "kiosk", "new 2 level parking garage")
+  
+  total_permits <- read_csv(filepath, show_col_types = FALSE) %>%
+    select(`Calendar Year Issued`, `Housing Units`, `Status Current`, Description, `Number Of Floors`) %>%
+    filter(
+      `Calendar Year Issued` >= 2001,
+      `Calendar Year Issued` <= 2021,
+      `Status Current` == "Final"
+    ) %>%
+    mutate(
+      `Housing Units` = if_else(`Housing Units` > 1000, `Housing Units` - 1000, `Housing Units`),
+      Description = tolower(Description)
+    ) %>%
+    filter(str_detect(Description, meaningful_pattern) | str_detect(Description, other_pattern)) %>%
+    filter(!str_detect(Description, paste(delete_conditions, collapse = "|"))) %>%
+    mutate(
+      `Housing Units` = if_else(str_detect(Description, "multi"), pmax(5, `Number Of Floors`), 1)
+    ) %>%
+    summarise(total = sum(`Housing Units`, na.rm = TRUE)) %>%
+    pull(total)
+  
+  rate <- total_permits / AUSTIN_2001_POP
+  message(sprintf("Austin permitting rate (2001-2021): %.6f", rate))
+  
+  rate
+}
 
 #_______________________________________________________________________________
 # DATA CONSTRUCTION ####
@@ -780,6 +826,7 @@ run_counterfactuals <- function(
     pop_totals,
     perm_rate_factors = NULL,
     use_percentile = FALSE,
+    use_austin = FALSE,
     percentile = PERCENTILE_FOR_PERM_RATE,
     store_results = FALSE
 ) {
@@ -788,7 +835,27 @@ run_counterfactuals <- function(
   
   results_list <- list()
   
-  if (use_percentile) {
+  if (use_austin) {
+    # Single scenario: raise to Austin's rate
+    austin_rate <- calculate_austin_perm_rate()
+    
+    perm_rate_cf <- cf_prep$data %>%
+      mutate(
+        rate = if_else(
+          in_counterfact == 1,
+          pmax(bua_perm_rate_01_21, austin_rate),
+          bua_perm_rate_01_21
+        )
+      ) %>%
+      pull(rate)
+    
+    result <- run_single_counterfactual(cf_prep, perm_rate_cf, austin_rate, factor_change = FALSE)
+    results_list[["austin"]] <- result
+    
+    message(sprintf("Austin rate scenario: Δy=%.2f%%, Δc=%.2f%%",
+                    result$welfare$pct_chg_y_tot, result$welfare$pct_chg_c_tot))
+    
+  } else if (use_percentile) {
     # Single scenario: raise to percentile
     pct_value <- quantile(cf_prep$data$bua_perm_rate_01_21, percentile)
     message(sprintf("Permitting rate at %.0f%% percentile: %.6f", percentile * 100, pct_value))
@@ -864,10 +931,20 @@ save_counterfactual_results <- function(results_list, cities_in_cf, params) {
       pct_chg_c_newcomers = NA
     ))
     
-    # Save
+    # Determine scenario label for filename
+    scenario_label <- if (name == "austin") {
+      "austin"
+    } else if (name == "percentile") {
+      "q98"
+    } else if (result$factor_change) {
+      paste0("fact_", result$factor_value)
+    } else {
+      name
+    }
+    
     filename <- sprintf(
       "Outputs/tbl_%s_cf_%d_cities_sb%.0f_gt%.0f_l%.0f.csv",
-      if (result$factor_change) paste0("fact_", result$factor_value) else "q98",
+      scenario_label,
       length(cities_in_cf),
       (params$sigma + params$beta) * 100,
       (params$gamma + params$theta) * 100,
@@ -931,15 +1008,6 @@ results_main <- run_counterfactuals(
   store_results = TRUE
 )
 
-# save metadata
-write_csv(
-  tibble(
-    percentile_used = PERCENTILE_FOR_PERM_RATE,
-    perm_rate_at_percentile = results_main$percentile$factor_value
-  ),
-  "Outputs/counterfactual_metadata.csv"
-)
-
 #-------------------------------------------------------------------------------
 # Vary cities
 #-------------------------------------------------------------------------------
@@ -996,6 +1064,30 @@ results_by_params <- map(1:nrow(ALT_PARAMS), function(i) {
     store_results = TRUE
   )
 })
+
+#-------------------------------------------------------------------------------
+# Austin comparison
+#-------------------------------------------------------------------------------
+
+message("\n=== Running Austin rate counterfactual ===\n")
+
+results_austin <- run_counterfactuals(
+  city_data = city_data,
+  cities_in_cf = cities_sets$top_10,
+  params = params_default,
+  pop_totals = pop_totals,
+  use_austin = TRUE,
+  store_results = TRUE
+)
+
+# save metadata with austin rate included
+write_csv(
+  tibble(
+    scenario = c("percentile", "austin"),
+    rate_used = c(results_main$percentile$factor_value, results_austin$austin$factor_value)
+  ),
+  "Outputs/counterfactual_metadata.csv"
+)
 
 
 #===============================================================================

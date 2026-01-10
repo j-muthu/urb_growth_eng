@@ -1,2 +1,3 @@
-percentile_used,perm_rate_at_percentile
-0.98,0.04268442593521368
+scenario,rate_used
+percentile,0.04268442593521368
+austin,0.12638477630795006
