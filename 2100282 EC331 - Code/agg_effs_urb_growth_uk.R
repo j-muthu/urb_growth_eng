@@ -669,7 +669,6 @@ find_marginal_city <- function(cf_data, cf_prep) {
   marginal_city_index <- num_cities
   
   for (i in 1:num_cities) {
-    # Compute counterfactual income and consumption
     temp_data <- cf_data %>%
       mutate(
         pop_21_cf = bua_21_pop_counterfact,
@@ -677,18 +676,22 @@ find_marginal_city <- function(cf_data, cf_prep) {
         c_21_cf = y_21_cf - (1 / (gamma + 1)) * tau_21 * geographic_constraint^gamma * pop_21_cf^(gamma + theta)
       ) %>%
       arrange(desc(c_21_cf)) %>%
-      mutate(city_order = row_number())
-    
-    # Cumulative urban population
-    pop_cum <- sum(temp_data$pop_21_cf)
+      mutate(
+        city_order = row_number(),
+        cumpop = cumsum(pop_21_cf)  # FIX: cumsum() not sum()
+      )
     
     temp_data <- temp_data %>%
       mutate(
-        pop_21_cf = if_else(pop_cum > pop_totals$tot_21 | city_order > marginal_city_index, NA_real_, pop_21_cf),
-        c_21_rural_threshold = rur_21_prod * (pop_totals$tot_21 - pop_cum)^(-params$lambda)
+        pop_21_cf = if_else(cumpop > pop_totals$tot_21 | city_order > marginal_city_index, NA_real_, pop_21_cf),
+        # each city gets its own rural threshold based on its cumulative position
+        c_21_rural_threshold = if_else(
+          cumpop >= pop_totals$tot_21,
+          Inf,  # if this city would overflow, rural consumption is infinite (impossible)
+          rur_21_prod * (pop_totals$tot_21 - cumpop)^(-params$lambda)
+        )
       )
     
-    # Check if marginal city is still viable
     marg_city <- temp_data %>% filter(city_order == marginal_city_index)
     
     if (nrow(marg_city) == 0 || is.na(marg_city$pop_21_cf)) {
@@ -710,14 +713,21 @@ find_marginal_city <- function(cf_data, cf_prep) {
       c_21_cf = y_21_cf - (1 / (gamma + 1)) * tau_21 * geographic_constraint^gamma * pop_21_cf^(gamma + theta)
     ) %>%
     arrange(desc(c_21_cf)) %>%
-    mutate(city_order = row_number()) %>%
+    mutate(
+      city_order = row_number(),
+      cumpop = cumsum(pop_21_cf)
+    ) %>%
     mutate(
       pop_21_cf = if_else(city_order > marginal_city_index, NA_real_, pop_21_cf),
       y_21_cf = if_else(is.na(pop_21_cf), NA_real_, y_21_cf),
       c_21_cf = if_else(is.na(pop_21_cf), NA_real_, c_21_cf)
     )
   
-  pop_cum_final <- sum(final_data$pop_21_cf, na.rm = TRUE)
+  # rural pop based on cumsum at marginal city
+  pop_cum_final <- final_data %>% 
+    filter(city_order == marginal_city_index) %>% 
+    pull(cumpop)
+  
   c_21_rural_threshold <- rur_21_prod * (pop_totals$tot_21 - pop_cum_final)^(-params$lambda)
   
   final_data <- final_data %>%
@@ -734,7 +744,6 @@ find_marginal_city <- function(cf_data, cf_prep) {
     pop_21_rur_counterfact = pop_totals$tot_21 - pop_cum_final
   )
 }
-
 
 #-------------------------------------------------------------------------------
 # Compute welfare metrics
@@ -899,7 +908,7 @@ run_counterfactuals <- function(
   
   # Optionally save
   if (store_results) {
-    save_counterfactual_results(results_list, cities_in_cf, params)
+    save_counterfactual_results(results_list, cities_in_cf, params, pop_totals)
   }
   
   results_list
@@ -909,7 +918,7 @@ run_counterfactuals <- function(
 #-------------------------------------------------------------------------------
 # Save results helper
 #-------------------------------------------------------------------------------
-save_counterfactual_results <- function(results_list, cities_in_cf, params) {
+save_counterfactual_results <- function(results_list, cities_in_cf, params, pop_totals) {
   for (name in names(results_list)) {
     result <- results_list[[name]]
     
@@ -924,7 +933,7 @@ save_counterfactual_results <- function(results_list, cities_in_cf, params) {
     tbl <- bind_rows(tbl, tibble(
       BUA22NM = "Rural areas",
       pct_chg_perm_rate = NA,
-      bua_21_pop = result$welfare$pop_21_rur_counterfact,
+      bua_21_pop = pop_totals$rur_21,
       bua_21_pop_counterfact = result$welfare$pop_21_rur_counterfact,
       pct_chg_y = result$welfare$pct_chg_c_rur / 100,
       pct_chg_c = NA,
