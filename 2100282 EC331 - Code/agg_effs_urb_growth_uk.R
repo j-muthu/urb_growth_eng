@@ -71,7 +71,6 @@ POP_ENGLAND <- list(
 # https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/datasets/populationestimatesforukenglandandwalesscotlandandnorthernireland
 POP_GROWTH_FACTORS <- list(
   ew_2001_to_2011 = 1.07396242237523,
-  ew_2001_to_2011_alt = 1.07278362492818,  # slightly different calc for some imputes
   ew_2011_to_2021 = 1.06492008640114,
   ew_2001_to_2021 = 1.14368415562741
 )
@@ -251,7 +250,7 @@ if (SKIP_DATA_CONSTRUCTION) {
       LSOA11NM = lsoa_name_2011,
       CHGIND = "N",  # newly added
       usual_resident_pop_2011 = usual_resident_pop_2011,
-      pop_2001_imputed = usual_resident_pop_2011 / POP_GROWTH_FACTORS$ew_2001_to_2011_alt
+      pop_2001_imputed = usual_resident_pop_2011 / POP_GROWTH_FACTORS$ew_2001_to_2011
     )
   
   lsoa_pops_2001_2011 <- bind_rows(lsoa_pops_2001_2011, missing_2011_lsoas)
