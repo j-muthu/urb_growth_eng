@@ -98,21 +98,6 @@ AUSTIN_2001_POP <- 669693
 # Permitting rate change factors for sensitivity analysis
 PERM_RATE_CHANGE_FACTORS <- c(0.05, 0.1, 0.25, 0.3, 0.5)
 
-# R&D employment shares by region
-# Source: ERC Insight report p.11
-# https://www.enterpriseresearch.ac.uk/wp-content/uploads/2021/09/ERC-Insight-The-UK%E2%80%99s-business-RD-workforce-Belt.Ri_.Akinremi.pdf
-RD_LABOUR_SHARES <- list(
-  "North East" = 0.0052,
-  "North West" = 0.0060,
-  "Yorkshire and The Humber" = 0.0056,
-  "East Midlands" = 0.0088,
-  "West Midlands" = 0.0097,
-  "East of England" = 0.0143,
-  "London" = 0.0069,
-  "South East" = 0.013,
-  "South West" = 0.0083
-)
-
 # London BUA codes for aggregation
 LONDON_BUAS <- tibble(
   BUA22NM = c(
@@ -516,8 +501,6 @@ if (SKIP_DATA_CONSTRUCTION) {
     filter(bua_21_pop >= CITY_POP_THRESHOLD) %>%
     # Round populations
     mutate(across(c(bua_01_pop, bua_11_pop, bua_21_pop), round)) %>%
-    # Add R&D labour shares
-    mutate(l_i = recode(RGN22NM, !!!RD_LABOUR_SHARES)) %>%
     # Keep only selected geographic constraint
     select(-all_of(setdiff(GEOGRAPHIC_CONSTRAINT_OPTIONS, GEOGRAPHIC_CONSTRAINT_VAR))) %>%
     rename(geographic_constraint = all_of(GEOGRAPHIC_CONSTRAINT_VAR)) %>%
@@ -560,13 +543,13 @@ prepare_counterfactual_data <- function(
     mutate(
       # Coefficient for rho*A*h (eq 21 divided by tau)
       eq_rho_A_h_coeff = (gamma + theta) / ((sigma + beta) * (gamma + 1)) *
-        (geographic_constraint^gamma / (1 - l_i)),
+        geographic_constraint^gamma,
       eq_rho_A_h_coeff_01 = eq_rho_A_h_coeff * bua_01_pop^(gamma + theta - sigma - beta),
       eq_rho_A_h_coeff_21 = eq_rho_A_h_coeff * bua_21_pop^(gamma + theta - sigma - beta),
       
       # Income / tau (eq 8)
-      income_div_tau_01 = eq_rho_A_h_coeff_01 * (1 - l_i) * bua_01_pop^(sigma + beta),
-      income_div_tau_21 = eq_rho_A_h_coeff_21 * (1 - l_i) * bua_21_pop^(sigma + beta),
+      income_div_tau_01 = eq_rho_A_h_coeff_01 * bua_01_pop^(sigma + beta),
+      income_div_tau_21 = eq_rho_A_h_coeff_21 * bua_21_pop^(sigma + beta),
       
       # Consumption / tau (eq 22)
       cons_coeff = (gamma + theta - sigma - beta) / ((sigma + beta) * (gamma + 1)) *
