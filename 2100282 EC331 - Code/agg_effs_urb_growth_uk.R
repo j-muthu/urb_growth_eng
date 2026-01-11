@@ -725,8 +725,9 @@ find_marginal_city <- function(cf_data, cf_prep) {
   
   # rural pop based on cumsum at marginal city
   pop_cum_final <- final_data %>% 
-    filter(city_order == marginal_city_index) %>% 
-    pull(cumpop)
+    filter(!is.na(pop_21_cf)) %>%
+    summarise(total = sum(pop_21_cf)) %>%
+    pull(total)
   
   c_21_rural_threshold <- rur_21_prod * (pop_totals$tot_21 - pop_cum_final)^(-params$lambda)
   
@@ -1098,6 +1099,296 @@ write_csv(
   "Outputs/counterfactual_metadata.csv"
 )
 
+#===============================================================================
+# CONTINUOUS COUNTERFACTUAL SWEEP FOR VISUALIZATION
+#===============================================================================
+
+#-------------------------------------------------------------------------------
+# Function to run counterfactual at a specific permitting rate
+#-------------------------------------------------------------------------------
+run_cf_at_rate <- function(cf_prep, target_rate, cities_in_cf) {
+  # Apply the target rate to affected cities (using pmax to only raise rates)
+  perm_rate_cf <- cf_prep$data %>%
+    mutate(
+      rate = if_else(
+        in_counterfact == 1,
+        pmax(bua_perm_rate_01_21, target_rate),
+        bua_perm_rate_01_21
+      )
+    ) %>%
+    pull(rate)
+  
+  # Run the counterfactual
+  result <- run_single_counterfactual(cf_prep, perm_rate_cf, target_rate, factor_change = FALSE)
+  
+  # Extract city-level results for affected cities
+  city_results <- result$data %>%
+    filter(in_counterfact == 1) %>%
+    select(BUA22NM, bua_21_pop, bua_21_pop_counterfact, pct_chg_y, pct_chg_c) %>%
+    mutate(
+      target_rate = target_rate,
+      pct_chg_pop = 100 * (bua_21_pop_counterfact - bua_21_pop) / bua_21_pop
+    )
+  
+  # Extract aggregate metrics
+  aggregate_results <- tibble(
+    target_rate = target_rate,
+    pct_chg_y_tot = result$welfare$pct_chg_y_tot,
+    pct_chg_c_tot = result$welfare$pct_chg_c_tot,
+    pct_chg_c_newcomers = result$welfare$pct_chg_c_rur,
+    pct_chg_pop_rur = result$welfare$pct_chg_pop_rur
+  )
+  
+  list(
+    city = city_results,
+    aggregate = aggregate_results
+  )
+}
+
+#-------------------------------------------------------------------------------
+# Calculate key reference values
+#-------------------------------------------------------------------------------
+
+# Prepare the base counterfactual data
+cf_prep_viz <- prepare_counterfactual_data(city_data, cities_sets$top_10, params_default, pop_totals)
+
+# Calculate percentiles and reference rates
+perm_rates_all <- cf_prep_viz$data$bua_perm_rate_01_21
+
+reference_rates <- tibble(
+  label = c("75th pct", "90th pct", "95th pct", "99th pct", "Max UK", "Austin, TX"),
+  rate = c(
+    quantile(perm_rates_all, 0.75),
+    quantile(perm_rates_all, 0.90),
+    quantile(perm_rates_all, 0.95),
+    quantile(perm_rates_all, 0.99),
+    max(perm_rates_all),
+    calculate_austin_perm_rate()
+  )
+)
+
+# Find the city with max permitting rate
+max_perm_city <- cf_prep_viz$data %>%
+  filter(bua_perm_rate_01_21 == max(bua_perm_rate_01_21)) %>%
+  pull(BUA22NM)
+
+reference_rates$label[reference_rates$label == "Max UK"] <- paste0("Max UK (", max_perm_city, ")")
+
+message("Reference rates:")
+print(reference_rates)
+
+#-------------------------------------------------------------------------------
+# Run sweep across permitting rates
+#-------------------------------------------------------------------------------
+
+# Define the range: from 75th percentile to slightly beyond Austin
+rate_min <- quantile(perm_rates_all, 0.75)
+rate_max <- reference_rates$rate[reference_rates$label == "Austin, TX"] * 1.05  # 5% beyond Austin
+rate_increment <- 0.001
+
+rate_sequence <- seq(rate_min, rate_max, by = rate_increment)
+message(sprintf("Running %d counterfactual scenarios...", length(rate_sequence)))
+
+# Initialize storage
+city_results_list <- vector("list", length(rate_sequence))
+aggregate_results_list <- vector("list", length(rate_sequence))
+
+# Run the sweep (this may take a few minutes)
+pb <- txtProgressBar(min = 0, max = length(rate_sequence), style = 3)
+for (i in seq_along(rate_sequence)) {
+  result <- run_cf_at_rate(cf_prep_viz, rate_sequence[i], cities_sets$top_10)
+  city_results_list[[i]] <- result$city
+  aggregate_results_list[[i]] <- result$aggregate
+  setTxtProgressBar(pb, i)
+}
+close(pb)
+
+# Combine into dataframes
+city_sweep_results <- bind_rows(city_results_list)
+aggregate_sweep_results <- bind_rows(aggregate_results_list)
+
+message("Sweep complete.")
+
+#-------------------------------------------------------------------------------
+# Plot 1: Income changes by city + newcomer consumption
+#-------------------------------------------------------------------------------
+
+# Get top 10 cities ordered by population for consistent legend
+top_10_ordered <- cf_prep_viz$data %>%
+  filter(in_counterfact == 1) %>%
+  arrange(desc(bua_21_pop)) %>%
+  pull(BUA22NM)
+
+# Set factor levels for consistent ordering
+city_sweep_results <- city_sweep_results %>%
+  mutate(BUA22NM = factor(BUA22NM, levels = top_10_ordered))
+
+# Determine scaling factor for secondary axis
+# We want newcomer consumption change to be visually comparable to city income changes
+max_y_income <- max(city_sweep_results$pct_chg_y, na.rm = TRUE)
+max_newcomer <- max(aggregate_sweep_results$pct_chg_c_newcomers, na.rm = TRUE)
+scale_factor <- max_y_income / max_newcomer
+
+# Create the plot
+income_plot <- ggplot() +
+  # City income lines
+  geom_line(
+    data = city_sweep_results,
+    aes(x = target_rate, y = pct_chg_y, color = BUA22NM),
+    linewidth = 0.8
+  ) +
+  # Newcomer consumption (scaled to secondary axis)
+  geom_line(
+    data = aggregate_sweep_results,
+    aes(x = target_rate, y = pct_chg_c_newcomers * scale_factor),
+    color = "black", linewidth = 1.2, linetype = "dashed"
+  ) +
+  # Vertical reference lines
+  geom_vline(
+    data = reference_rates,
+    aes(xintercept = rate),
+    linetype = "dotted", color = "gray40", linewidth = 0.5
+  ) +
+  # Labels for reference lines
+  geom_text(
+    data = reference_rates,
+    aes(x = rate, y = max_y_income * 0.95, label = label),
+    angle = 90, hjust = 1, vjust = -0.3, size = 2.5, color = "gray30"
+  ) +
+  # Scales
+  scale_y_continuous(
+    name = "% change in city income",
+    sec.axis = sec_axis(~ . / scale_factor, name = "% change in newcomer consumption")
+  ) +
+  scale_x_continuous(
+    name = "Counterfactual permitting rate",
+    labels = scales::number_format(accuracy = 0.01)
+  ) +
+  scale_color_brewer(palette = "Paired", name = "City") +
+  # Theme
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.text = element_text(size = 8),
+    axis.title.y.right = element_text(color = "black"),
+    panel.grid.minor = element_blank()
+  ) +
+  labs(
+    title = "Counterfactual income gains from relaxed permitting",
+    subtitle = "Dashed line: newcomer consumption change (right axis)",
+    caption = "Parameters: σ+β = 0.08, γ+θ = 0.11, λ = 0.18"
+  )
+
+print(income_plot)
+
+ggsave(
+  "Outputs/cf_income_by_permitting_rate.png",
+  income_plot,
+  width = 28, height = 16, units = "cm", dpi = 320
+)
+
+#-------------------------------------------------------------------------------
+# Plot 2: Population changes by city
+#-------------------------------------------------------------------------------
+
+# For population changes, I recommend a heatmap or faceted area chart
+# A heatmap works well because we have two dimensions (city × rate) and want to show magnitude
+
+# Option A: Faceted line chart (each city gets its own panel)
+pop_change_faceted <- ggplot(city_sweep_results, aes(x = target_rate, y = pct_chg_pop)) +
+  geom_line(aes(color = BUA22NM), linewidth = 0.8, show.legend = FALSE) +
+  geom_area(aes(fill = BUA22NM), alpha = 0.3, show.legend = FALSE) +
+  geom_vline(
+    data = reference_rates,
+    aes(xintercept = rate),
+    linetype = "dotted", color = "gray40", linewidth = 0.4
+  ) +
+  facet_wrap(~ BUA22NM, scales = "free_y", ncol = 2) +
+  scale_x_continuous(
+    name = "Counterfactual permitting rate",
+    labels = scales::number_format(accuracy = 0.01)
+  ) +
+  scale_y_continuous(
+    name = "% change in city population",
+    labels = scales::percent_format(scale = 1)
+  ) +
+  scale_color_brewer(palette = "Paired") +
+  scale_fill_brewer(palette = "Paired") +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 9, face = "bold"),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 7)
+  ) +
+  labs(
+    title = "Counterfactual population growth from relaxed permitting",
+    subtitle = "Each panel shows one city; vertical lines mark reference rates",
+    caption = "Parameters: σ+β = 0.08, γ+θ = 0.11, λ = 0.18"
+  )
+
+print(pop_change_faceted)
+
+ggsave(
+  "Outputs/cf_population_by_permitting_rate_faceted.png",
+  pop_change_faceted,
+  width = 24, height = 28, units = "cm", dpi = 320
+)
+
+# Option B: Heatmap (compact view of all cities at once)
+# Bin the rates to reduce visual noise
+city_sweep_binned <- city_sweep_results %>%
+  mutate(rate_bin = cut(target_rate, breaks = 50, labels = FALSE)) %>%
+  group_by(BUA22NM, rate_bin) %>%
+  summarise(
+    target_rate = mean(target_rate),
+    pct_chg_pop = mean(pct_chg_pop),
+    .groups = "drop"
+  )
+
+pop_change_heatmap <- ggplot(city_sweep_binned, aes(x = target_rate, y = BUA22NM, fill = pct_chg_pop)) +
+  geom_tile() +
+  geom_vline(
+    data = reference_rates,
+    aes(xintercept = rate),
+    linetype = "dashed", color = "white", linewidth = 0.6
+  ) +
+  scale_fill_viridis_c(
+    name = "% pop\nchange",
+    option = "plasma",
+    labels = scales::percent_format(scale = 1)
+  ) +
+  scale_x_continuous(
+    name = "Counterfactual permitting rate",
+    labels = scales::number_format(accuracy = 0.01)
+  ) +
+  scale_y_discrete(name = NULL, limits = rev(top_10_ordered)) +  # largest at top
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.y = element_text(size = 9)
+  ) +
+  labs(
+    title = "Population growth intensity across cities and permitting rates",
+    subtitle = "Dashed lines mark reference rates (75th pct, 90th, 95th, 99th, Max UK, Austin)",
+    caption = "Parameters: σ+β = 0.08, γ+θ = 0.11, λ = 0.18"
+  )
+
+print(pop_change_heatmap)
+
+ggsave(
+  "Outputs/cf_population_heatmap.png",
+  pop_change_heatmap,
+  width = 24, height = 14, units = "cm", dpi = 320
+)
+
+#-------------------------------------------------------------------------------
+# Save sweep data for later use
+#-------------------------------------------------------------------------------
+write_csv(city_sweep_results, "Outputs/cf_sweep_city_results.csv")
+write_csv(aggregate_sweep_results, "Outputs/cf_sweep_aggregate_results.csv")
+write_csv(reference_rates, "Outputs/cf_reference_rates.csv")
+
+message("\n=== Visualization complete ===\n")
 
 #===============================================================================
 # PLOTS AND REGRESSIONS
