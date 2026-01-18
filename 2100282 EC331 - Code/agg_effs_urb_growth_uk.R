@@ -256,6 +256,56 @@ if (SKIP_DATA_CONSTRUCTION) {
   lsoa_pops_2001_2011 <- bind_rows(lsoa_pops_2001_2011, missing_2011_lsoas)
   
   #-----------------------------------------------------------------------------
+  # Diagnostic: how much population is in split LSOAs?
+  # If this is small, the imputation bias from assuming national growth rates
+  # for split LSOAs is unlikely to materially affect results.
+  #-----------------------------------------------------------------------------
+  
+  split_diagnostic <- lsoa_pops_2001_2011 %>%
+    summarise(
+      n_split = sum(CHGIND == "S", na.rm = TRUE),
+      n_merged = sum(CHGIND == "M", na.rm = TRUE),
+      n_unchanged = sum(CHGIND == "U", na.rm = TRUE),
+      n_new = sum(CHGIND == "N", na.rm = TRUE),
+      n_total = n(),
+      # Use 2011 observed population as denominator (not imputed 2001)
+      pop_2011_split = sum(usual_resident_pop_2011[CHGIND == "S"], na.rm = TRUE),
+      pop_2011_merged = sum(usual_resident_pop_2011[CHGIND == "M"], na.rm = TRUE),
+      pop_2011_unchanged = sum(usual_resident_pop_2011[CHGIND == "U"], na.rm = TRUE),
+      pop_2011_new = sum(usual_resident_pop_2011[CHGIND == "N"], na.rm = TRUE),
+      pop_2011_total = sum(usual_resident_pop_2011, na.rm = TRUE)
+    ) %>%
+    mutate(
+      pct_lsoas_split = 100 * n_split / n_total,
+      pct_pop_split = 100 * pop_2011_split / pop_2011_total,
+      pct_lsoas_new = 100 * n_new / n_total,
+      pct_pop_new = 100 * pop_2011_new / pop_2011_total
+    )
+  
+  message("\n=== LSOA Split/Merge Diagnostic (2001→2011) ===")
+  message(sprintf("Total 2011 LSOAs: %d", split_diagnostic$n_total))
+  message(sprintf("  - Unchanged (U): %d (%.1f%% of LSOAs, %.1f%% of 2011 pop)",
+                  split_diagnostic$n_unchanged,
+                  100 * split_diagnostic$n_unchanged / split_diagnostic$n_total,
+                  100 * split_diagnostic$pop_2011_unchanged / split_diagnostic$pop_2011_total))
+  message(sprintf("  - Split (S):     %d (%.1f%% of LSOAs, %.1f%% of 2011 pop) ← 2001 POP IMPUTED",
+                  split_diagnostic$n_split,
+                  split_diagnostic$pct_lsoas_split,
+                  split_diagnostic$pct_pop_split))
+  message(sprintf("  - Merged (M):    %d (%.1f%% of LSOAs, %.1f%% of 2011 pop)",
+                  split_diagnostic$n_merged,
+                  100 * split_diagnostic$n_merged / split_diagnostic$n_total,
+                  100 * split_diagnostic$pop_2011_merged / split_diagnostic$pop_2011_total))
+  message(sprintf("  - New (N):       %d (%.1f%% of LSOAs, %.1f%% of 2011 pop) ← 2001 POP IMPUTED",
+                  split_diagnostic$n_new,
+                  split_diagnostic$pct_lsoas_new,
+                  split_diagnostic$pct_pop_new))
+  message(sprintf("LSOAs with imputed 2001 pop: %.0f people in 2011 (%.1f%% of 2011 total)",
+                  split_diagnostic$pop_2011_split + split_diagnostic$pop_2011_new,
+                  split_diagnostic$pct_pop_split + split_diagnostic$pct_pop_new))
+  message("================================================\n")
+  
+  #-----------------------------------------------------------------------------
   # 2011-2021 LSOA merging (chained)
   #-----------------------------------------------------------------------------
   
