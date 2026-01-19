@@ -127,14 +127,6 @@ BORDERING_LADS <- list(
                 "E07000177", "E07000221", "E07000220")
 )
 
-# Alternative parameter combinations for robustness (from DP Table IV)
-ALT_PARAMS <- tibble(
-  sigma = c(0.02, 0.03, 0.04, 0.02, 0.03, 0.02, 0.03, 0.04),
-  beta  = c(0.02, 0.03, 0.04, 0.02, 0.03, 0.02, 0.03, 0.04),
-  gamma = c(0.06, 0.06, 0.06, 0.07, 0.07, 0.08, 0.08, 0.08),
-  theta = c(0.03, 0.03, 0.03, 0.04, 0.04, 0.05, 0.05, 0.05)
-)
-
 #_______________________________________________________________________________
 # AUSTIN PERMITTING RATE CALCULATION ####
 #_______________________________________________________________________________
@@ -257,8 +249,6 @@ if (SKIP_DATA_CONSTRUCTION) {
   
   #-----------------------------------------------------------------------------
   # Diagnostic: how much population is in split LSOAs?
-  # If this is small, the imputation bias from assuming national growth rates
-  # for split LSOAs is unlikely to materially affect results.
   #-----------------------------------------------------------------------------
   
   split_diagnostic <- lsoa_pops_2001_2011 %>%
@@ -268,7 +258,6 @@ if (SKIP_DATA_CONSTRUCTION) {
       n_unchanged = sum(CHGIND == "U", na.rm = TRUE),
       n_new = sum(CHGIND == "N", na.rm = TRUE),
       n_total = n(),
-      # Use 2011 observed population as denominator (not imputed 2001)
       pop_2011_split = sum(usual_resident_pop_2011[CHGIND == "S"], na.rm = TRUE),
       pop_2011_merged = sum(usual_resident_pop_2011[CHGIND == "M"], na.rm = TRUE),
       pop_2011_unchanged = sum(usual_resident_pop_2011[CHGIND == "U"], na.rm = TRUE),
@@ -310,12 +299,10 @@ if (SKIP_DATA_CONSTRUCTION) {
   #-----------------------------------------------------------------------------
   
   lsoa_pops_all_years <- lsoa_pops_2001_2011 %>%
-    # Join to 2011-2021 lookup
     full_join(
       lsoa_lookup_2011_to_2021_raw %>% select(2:7),
       by = "LSOA11CD"
     ) %>%
-    # Aggregate to 2021 LSOA level
     group_by(LSOA21CD) %>%
     summarize(
       pop_2011_final = sum(usual_resident_pop_2011, na.rm = TRUE),
@@ -325,10 +312,8 @@ if (SKIP_DATA_CONSTRUCTION) {
       LAD22NM = first(LAD22NM),
       .groups = "drop"
     ) %>%
-    # Join 2021 population
     full_join(lsoa_pop_2021_raw, by = c("LSOA21CD" = "lsoa_21_code")) %>%
     select(-LSOA21NM) %>%
-    # Impute missing 2001/2011 values for new 2021 LSOAs
     mutate(
       pop_2011_final = if_else(
         is.na(pop_2011_final) | pop_2011_final == 0,
@@ -341,7 +326,6 @@ if (SKIP_DATA_CONSTRUCTION) {
         pop_2001_final
       )
     ) %>%
-    # Keep only English LSOAs
     filter(startsWith(LSOA21CD, "E"))
   
   #-----------------------------------------------------------------------------
@@ -353,7 +337,7 @@ if (SKIP_DATA_CONSTRUCTION) {
     select(-lsoa_2021_name)
   
   #-----------------------------------------------------------------------------
-  # Fix missing LAD codes (load from pre-computed API results)
+  # Fix missing LAD codes
   #-----------------------------------------------------------------------------
   
   lads_to_add <- read_csv("Data/lads_to_add_backup.csv")
@@ -363,14 +347,13 @@ if (SKIP_DATA_CONSTRUCTION) {
     mutate(LAD22CD = coalesce(LAD22CD.x, LAD22CD.y)) %>%
     select(-LAD22CD.x, -LAD22CD.y)
   
-  # Get list of valid LAD codes
   valid_lad_codes <- lsoa_with_lad %>%
     filter(!is.na(LAD22CD)) %>%
     distinct(LAD22CD) %>%
     pull(LAD22CD)
   
   #-----------------------------------------------------------------------------
-  # Process permitting data (chained)
+  # Process permitting data
   #-----------------------------------------------------------------------------
   
   perm_rates_by_year <- perm_rates_raw %>%
@@ -387,7 +370,6 @@ if (SKIP_DATA_CONSTRUCTION) {
     ) %>%
     filter(year <= PERM_DATA_END_YEAR)
   
-  # Function to impute missing permit values via linear regression
   impute_permits_lm <- function(data) {
     if (sum(!is.na(data$total_dwellings)) < 2) return(data)
     
@@ -401,20 +383,17 @@ if (SKIP_DATA_CONSTRUCTION) {
     data
   }
   
-  # Identify LPACDs that can't be imputed (all missing or only 1 obs)
   lpacd_cant_impute <- perm_rates_by_year %>%
     group_by(LPACD) %>%
     summarise(n_nonmiss = sum(!is.na(total_dwellings)), .groups = "drop") %>%
     filter(n_nonmiss <= 1) %>%
     pull(LPACD)
   
-  # Apply linear imputation
   perm_rates_imputed <- perm_rates_by_year %>%
     group_by(LPACD, LPANM) %>%
     group_modify(~impute_permits_lm(.x)) %>%
     ungroup()
   
-  # For LPACDs that couldn't be imputed, use median of bordering LADs
   impute_from_bordering <- function(target_lpacd, bordering_lpacds, data) {
     valid_bordering <- bordering_lpacds[bordering_lpacds %in% setdiff(unique(data$LPACD), lpacd_cant_impute)]
     if (length(valid_bordering) == 0) return(NULL)
@@ -432,12 +411,10 @@ if (SKIP_DATA_CONSTRUCTION) {
     ~impute_from_bordering(.x, .y, perm_rates_imputed)
   )
   
-  # Combine and aggregate to summary
   perm_rates_final <- perm_rates_imputed %>%
     filter(!LPACD %in% lpacd_cant_impute) %>%
     select(LPACD, LPANM, year, total_dwellings_final) %>%
     bind_rows(bordering_imputed) %>%
-    # Handle any duplicates by summing
     group_by(LPACD, year) %>%
     summarise(total_dwellings_final = sum(total_dwellings_final, na.rm = TRUE), .groups = "drop")
   
@@ -450,7 +427,7 @@ if (SKIP_DATA_CONSTRUCTION) {
     )
   
   #-----------------------------------------------------------------------------
-  # LSOA to BUA mapping (chained)
+  # LSOA to BUA mapping
   #-----------------------------------------------------------------------------
   
   buas_to_add <- read_csv("Data/buas_to_add_backup.csv")
@@ -468,9 +445,7 @@ if (SKIP_DATA_CONSTRUCTION) {
   
   lsoa_full <- lsoa_with_lad %>%
     left_join(lsoa_bua_lookup %>% select(LSOA21CD, BUA22CD, BUA22NM, RGN22CD, RGN22NM), by = "LSOA21CD") %>%
-    # Remove invalid BUA code
     filter(BUA22CD != "E63999999") %>%
-    # Fix Kingston upon Thames coding error
     mutate(
       BUA22NM = if_else(LSOA21CD == "E01002946", "Kingston upon Thames", BUA22NM),
       BUA22CD = if_else(LSOA21CD == "E01002946", "E63005164", BUA22CD)
@@ -509,7 +484,6 @@ if (SKIP_DATA_CONSTRUCTION) {
   # Aggregate to BUA level with London consolidation
   #-----------------------------------------------------------------------------
   
-  # Aggregate permits with London consolidation
   bua_permits_london <- bua_permits %>%
     mutate(BUA22CD = if_else(BUA22CD %in% LONDON_BUAS$BUA22CD, "LON999999", BUA22CD)) %>%
     group_by(BUA22CD) %>%
@@ -524,7 +498,6 @@ if (SKIP_DATA_CONSTRUCTION) {
       bua_perm_rate_01_21 = sum_bua_perms_01_21 / bua_pop_01
     )
   
-  # Aggregate LSOA data to BUA level with London consolidation
   city_data <- lsoa_full %>%
     mutate(
       BUA22CD = if_else(BUA22CD %in% LONDON_BUAS$BUA22CD, "LON999999", BUA22CD),
@@ -538,27 +511,20 @@ if (SKIP_DATA_CONSTRUCTION) {
       bua_01_pop = sum(pop_2001_final),
       bua_11_pop = sum(pop_2011_final),
       bua_21_pop = sum(total_lsoa_pop_21),
-      # Geographic constraints: z_i = 1/(1 - fraction constrained)
       mean_z_i = 1 / (1 - mean(pct_forest_open_land_water) / 100),
       median_z_i = 1 / (1 - median(pct_forest_open_land_water) / 100),
       min_z_i = 1 / (1 - min(pct_forest_open_land_water) / 100),
       .groups = "drop"
     ) %>%
-    # Join permit data
     left_join(bua_permits_london %>% select(BUA22CD, bua_perm_rate_01_11, bua_perm_rate_01_21), by = "BUA22CD") %>%
-    # Apply population threshold
     filter(bua_21_pop >= CITY_POP_THRESHOLD) %>%
-    # Round populations
     mutate(across(c(bua_01_pop, bua_11_pop, bua_21_pop), round)) %>%
-    # Keep only selected geographic constraint
     select(-all_of(setdiff(GEOGRAPHIC_CONSTRAINT_OPTIONS, GEOGRAPHIC_CONSTRAINT_VAR))) %>%
     rename(geographic_constraint = all_of(GEOGRAPHIC_CONSTRAINT_VAR)) %>%
     arrange(desc(bua_21_pop))
   
-  # Save intermediate data
   write_csv(city_data, "Data/agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints.csv")
   
-  # Compute derived population values
   urb_01_pop <- sum(city_data$bua_01_pop)
   urb_21_pop <- sum(city_data$bua_21_pop)
   rur_01_pop <- POP_ENGLAND$y2001 - urb_01_pop
@@ -668,12 +634,9 @@ prepare_counterfactual_data <- function(
 # Compute counterfactual populations given permitting rate changes
 #-------------------------------------------------------------------------------
 compute_cf_populations <- function(cf_prep, perm_rate_cf) {
-  # perm_rate_cf is a vector of counterfactual permitting rates (same length as cf_prep$data)
-  
   cf_prep$data %>%
     mutate(
       perm_rate_counterfact = perm_rate_cf,
-      # DP's formula: N_cf = (perm_rate_cf / perm_rate_actual) * (N_21 - N_01) + N_01
       bua_21_pop_counterfact = if_else(
         in_counterfact == 1,
         (perm_rate_counterfact / bua_perm_rate_01_21) * (bua_21_pop - bua_01_pop) + bua_01_pop,
@@ -684,7 +647,7 @@ compute_cf_populations <- function(cf_prep, perm_rate_cf) {
 
 
 #-------------------------------------------------------------------------------
-# Find marginal city (the while loop extracted)
+# Find marginal city
 #-------------------------------------------------------------------------------
 find_marginal_city <- function(cf_data, cf_prep) {
   params <- cf_prep$params
@@ -710,16 +673,15 @@ find_marginal_city <- function(cf_data, cf_prep) {
       arrange(desc(c_21_cf)) %>%
       mutate(
         city_order = row_number(),
-        cumpop = cumsum(pop_21_cf)  # FIX: cumsum() not sum()
+        cumpop = cumsum(pop_21_cf)
       )
     
     temp_data <- temp_data %>%
       mutate(
         pop_21_cf = if_else(cumpop > pop_totals$tot_21 | city_order > marginal_city_index, NA_real_, pop_21_cf),
-        # each city gets its own rural threshold based on its cumulative position
         c_21_rural_threshold = if_else(
           cumpop >= pop_totals$tot_21,
-          Inf,  # if this city would overflow, rural consumption is infinite (impossible)
+          Inf,
           rur_21_prod * (pop_totals$tot_21 - cumpop)^(-params$lambda)
         )
       )
@@ -737,7 +699,6 @@ find_marginal_city <- function(cf_data, cf_prep) {
     if (marginal_city_index < 1) break
   }
   
-  # Final computation with correct marginal city
   final_data <- cf_data %>%
     mutate(
       pop_21_cf = bua_21_pop_counterfact,
@@ -755,7 +716,6 @@ find_marginal_city <- function(cf_data, cf_prep) {
       c_21_cf = if_else(is.na(pop_21_cf), NA_real_, c_21_cf)
     )
   
-  # rural pop based on cumsum at marginal city
   pop_cum_final <- final_data %>% 
     filter(!is.na(pop_21_cf)) %>%
     summarise(total = sum(pop_21_cf)) %>%
@@ -789,7 +749,7 @@ compute_welfare_metrics <- function(marg_result, cf_prep) {
   c_21_rur_cf <- marg_result$c_21_rur_counterfact
   pop_21_rur_cf <- marg_result$pop_21_rur_counterfact
   
-  # Baseline (actual) values
+  # Baseline values
   y_21_baseline <- sum(final_data$y_21 * (final_data$bua_21_pop / pop_totals$tot_21), na.rm = TRUE) +
     rur_21_income * (pop_totals$rur_21 / pop_totals$tot_21)
   
@@ -827,182 +787,34 @@ compute_welfare_metrics <- function(marg_result, cf_prep) {
 
 
 #-------------------------------------------------------------------------------
-# Run single counterfactual scenario
+# Run single counterfactual scenario (streamlined for sweep)
 #-------------------------------------------------------------------------------
-run_single_counterfactual <- function(cf_prep, perm_rate_cf, factor_value, factor_change = TRUE) {
-  # Compute counterfactual populations
+run_single_counterfactual <- function(cf_prep, perm_rate_cf) {
   cf_pop_data <- compute_cf_populations(cf_prep, perm_rate_cf)
-  
-  # Find marginal city
   marg_result <- find_marginal_city(cf_pop_data, cf_prep)
-  
-  # Compute welfare
   welfare <- compute_welfare_metrics(marg_result, cf_prep)
   
-  # Add city-level percentage changes
   final_data <- marg_result$data %>%
     mutate(
       pct_chg_y = 100 * (y_21_cf - y_21) / y_21,
-      pct_chg_c = 100 * (c_21_cf - c_21) / c_21,
-      pct_chg_perm_rate = 100 * (perm_rate_counterfact - bua_perm_rate_01_21) / bua_perm_rate_01_21
+      pct_chg_c = 100 * (c_21_cf - c_21) / c_21
     )
   
   list(
     data = final_data,
-    welfare = welfare,
-    params = cf_prep$params,
-    factor_value = factor_value,
-    factor_change = factor_change,
-    rur_21_income = cf_prep$rur_21_income
+    welfare = welfare
   )
 }
 
-
-#-------------------------------------------------------------------------------
-# Main counterfactual function (orchestrates multiple scenarios)
-#-------------------------------------------------------------------------------
-run_counterfactuals <- function(
-    city_data,
-    cities_in_cf,
-    params,
-    pop_totals,
-    perm_rate_factors = NULL,
-    use_percentile = FALSE,
-    use_austin = FALSE,
-    percentile = PERCENTILE_FOR_PERM_RATE,
-    store_results = FALSE
-) {
-  # Prepare base data
-  cf_prep <- prepare_counterfactual_data(city_data, cities_in_cf, params, pop_totals)
-  
-  results_list <- list()
-  
-  if (use_austin) {
-    # Single scenario: raise to Austin's rate
-    austin_rate <- calculate_austin_perm_rate()
-    
-    perm_rate_cf <- cf_prep$data %>%
-      mutate(
-        rate = if_else(
-          in_counterfact == 1,
-          pmax(bua_perm_rate_01_21, austin_rate),
-          bua_perm_rate_01_21
-        )
-      ) %>%
-      pull(rate)
-    
-    result <- run_single_counterfactual(cf_prep, perm_rate_cf, austin_rate, factor_change = FALSE)
-    results_list[["austin"]] <- result
-    
-    message(sprintf("Austin rate scenario: Δy=%.2f%%, Δc=%.2f%%",
-                    result$welfare$pct_chg_y_tot, result$welfare$pct_chg_c_tot))
-    
-  } else if (use_percentile) {
-    # Single scenario: raise to percentile
-    pct_value <- quantile(cf_prep$data$bua_perm_rate_01_21, percentile)
-    message(sprintf("Permitting rate at %.0f%% percentile: %.6f", percentile * 100, pct_value))
-    
-    perm_rate_cf <- cf_prep$data %>%
-      mutate(
-        rate = if_else(
-          in_counterfact == 1,
-          pmax(bua_perm_rate_01_21, pct_value),
-          bua_perm_rate_01_21
-        )
-      ) %>%
-      pull(rate)
-    
-    result <- run_single_counterfactual(cf_prep, perm_rate_cf, pct_value, factor_change = FALSE)
-    results_list[["percentile"]] <- result
-    
-    message(sprintf("Percentile %.0f%% scenario: Δy=%.2f%%, Δc=%.2f%%",
-                    percentile * 100, result$welfare$pct_chg_y_tot, result$welfare$pct_chg_c_tot))
-    
-  } else if (!is.null(perm_rate_factors)) {
-    # Multiple scenarios: multiplicative factors
-    for (factor in perm_rate_factors) {
-      perm_rate_cf <- cf_prep$data %>%
-        mutate(
-          rate = if_else(
-            in_counterfact == 1,
-            bua_perm_rate_01_21 * (1 + factor),
-            bua_perm_rate_01_21
-          )
-        ) %>%
-        pull(rate)
-      
-      result <- run_single_counterfactual(cf_prep, perm_rate_cf, factor, factor_change = TRUE)
-      results_list[[as.character(factor)]] <- result
-      
-      message(sprintf("Factor %.0f%% scenario: Δy=%.2f%%, Δc=%.2f%%",
-                      factor * 100, result$welfare$pct_chg_y_tot, result$welfare$pct_chg_c_tot))
-    }
-  }
-  
-  # Optionally save
-  if (store_results) {
-    save_counterfactual_results(results_list, cities_in_cf, params, pop_totals)
-  }
-  
-  results_list
-}
-
-
-#-------------------------------------------------------------------------------
-# Save results helper
-#-------------------------------------------------------------------------------
-save_counterfactual_results <- function(results_list, cities_in_cf, params, pop_totals) {
-  for (name in names(results_list)) {
-    result <- results_list[[name]]
-    
-    # Create presentable table
-    tbl <- result$data %>%
-      filter(in_counterfact == 1) %>%
-      select(BUA22NM, pct_chg_perm_rate, bua_21_pop, bua_21_pop_counterfact, pct_chg_y, pct_chg_c) %>%
-      mutate(across(starts_with("pct_"), ~ . / 100)) %>%
-      mutate(pct_chg_c_newcomers = result$welfare$pct_chg_c_rur / 100)
-    
-    # Add rural row
-    tbl <- bind_rows(tbl, tibble(
-      BUA22NM = "Rural areas",
-      pct_chg_perm_rate = NA,
-      bua_21_pop = pop_totals$rur_21,
-      bua_21_pop_counterfact = result$welfare$pop_21_rur_counterfact,
-      pct_chg_y = result$welfare$pct_chg_c_rur / 100,
-      pct_chg_c = NA,
-      pct_chg_c_newcomers = NA
-    ))
-    
-    # Determine scenario label for filename
-    scenario_label <- if (name == "austin") {
-      "austin"
-    } else if (name == "percentile") {
-      "q98"
-    } else if (result$factor_change) {
-      paste0("fact_", result$factor_value)
-    } else {
-      name
-    }
-    
-    filename <- sprintf(
-      "Outputs/tbl_%s_cf_%d_cities_sb%.0f_gt%.0f_l%.0f.csv",
-      scenario_label,
-      length(cities_in_cf),
-      (params$sigma + params$beta) * 100,
-      (params$gamma + params$theta) * 100,
-      params$lambda * 100
-    )
-    
-    write_csv(tbl, filename)
-  }
-}
-
-
 #===============================================================================
-# RUN ANALYSIS
+# PARAMETER SWEEP AND FAN CHART ANALYSIS (OPTIMIZED)
 #===============================================================================
 
-# Population totals (computed during data construction or loading)
+message("\n=== SETTING UP PARAMETER SWEEP ===\n")
+
+#-------------------------------------------------------------------------------
+# Population totals
+#-------------------------------------------------------------------------------
 pop_totals <- list(
   tot_01 = POP_ENGLAND$y2001,
   tot_21 = POP_ENGLAND$y2021,
@@ -1012,477 +824,393 @@ pop_totals <- list(
   rur_21 = rur_21_pop
 )
 
-# Default parameters
-params_default <- list(
-  gamma = PARAMS_USA$gamma,
-  theta = PARAMS_USA$theta,
-  sigma = PARAMS_USA$sigma,
-  beta = PARAMS_USA$beta,
-  lambda = PARAMS_USA$lambda
+#-------------------------------------------------------------------------------
+# Parameter grids
+#-------------------------------------------------------------------------------
+param_grid <- expand.grid(
+  gamma = c(0.03, 0.05, 0.08),
+  theta = c(0.05, 0.06, 0.07),
+  sigma = c(0.008, 0.025, 0.038),
+  beta  = c(0.01, 0.015, 0.03),
+  lambda = c(0.10, 0.12, 0.16),
+  stringsAsFactors = FALSE
 )
 
-# Cities to evaluate
+central_params <- list(gamma = 0.05, theta = 0.06, sigma = 0.025, beta = 0.015, lambda = 0.12)
+
+message(sprintf("Parameter grid has %d combinations", nrow(param_grid)))
+
+#-------------------------------------------------------------------------------
+# City sets
+#-------------------------------------------------------------------------------
 cities_sets <- list(
-  top_10 = city_data$BUA22NM[1:10],
-  top_5 = city_data$BUA22NM[1:5],
-  top_2 = city_data$BUA22NM[1:2],
   london_only = city_data$BUA22NM[1],
-  oxbridge = c("Greater London", "Oxford", "Cambridge (Cambridge)")
+  top_4 = city_data$BUA22NM[1:4],
+  top_6 = city_data$BUA22NM[1:6],
+  university_cities = c("Greater London", "Oxford", "Cambridge (Cambridge)"),
+  top_10 = city_data$BUA22NM[1:10]
 )
 
-#-------------------------------------------------------------------------------
-# Main analysis with default parameters
-#-------------------------------------------------------------------------------
-
-message("\n=== Running main counterfactual with default parameters ===\n")
-
-# Prepare base data (save for plotting)
-cf_prep_main <- prepare_counterfactual_data(city_data, cities_sets$top_10, params_default, pop_totals)
-write_csv(cf_prep_main$data, "Outputs/dp_original_params_counterfactual_data.csv")
-
-# Run with percentile approach
-results_main <- run_counterfactuals(
-  city_data = city_data,
-  cities_in_cf = cities_sets$top_10,
-  params = params_default,
-  pop_totals = pop_totals,
-  use_percentile = TRUE,
-  store_results = TRUE
-)
-
-#-------------------------------------------------------------------------------
-# Vary cities
-#-------------------------------------------------------------------------------
-
-message("\n=== Varying cities ===\n")
-
-results_by_cities <- map(cities_sets, function(cities) {
-  run_counterfactuals(
-    city_data = city_data,
-    cities_in_cf = cities,
-    params = params_default,
-    pop_totals = pop_totals,
-    use_percentile = TRUE,
-    store_results = TRUE
-  )
-})
-
-#-------------------------------------------------------------------------------
-# Vary factors
-#-------------------------------------------------------------------------------
-
-message("\n=== Varying permitting rate factors ===\n")
-
-results_by_factor <- run_counterfactuals(
-  city_data = city_data,
-  cities_in_cf = cities_sets$top_10,
-  params = params_default,
-  pop_totals = pop_totals,
-  perm_rate_factors = PERM_RATE_CHANGE_FACTORS,
-  store_results = TRUE
-)
-
-#-------------------------------------------------------------------------------
-# Vary parameters
-#-------------------------------------------------------------------------------
-
-message("\n=== Varying model parameters ===\n")
-
-results_by_params <- map(1:nrow(ALT_PARAMS), function(i) {
-  alt_params <- list(
-    gamma = ALT_PARAMS$gamma[i],
-    theta = ALT_PARAMS$theta[i],
-    sigma = ALT_PARAMS$sigma[i],
-    beta = ALT_PARAMS$beta[i],
-    lambda = PARAMS_USA$lambda
-  )
-  
-  run_counterfactuals(
-    city_data = city_data,
-    cities_in_cf = cities_sets$top_10,
-    params = alt_params,
-    pop_totals = pop_totals,
-    use_percentile = TRUE,
-    store_results = TRUE
-  )
-})
-
-#-------------------------------------------------------------------------------
-# Austin comparison
-#-------------------------------------------------------------------------------
-
-message("\n=== Running Austin rate counterfactual ===\n")
-
-results_austin <- run_counterfactuals(
-  city_data = city_data,
-  cities_in_cf = cities_sets$top_10,
-  params = params_default,
-  pop_totals = pop_totals,
-  use_austin = TRUE,
-  store_results = TRUE
-)
-
-# save metadata with austin rate included
-write_csv(
-  tibble(
-    scenario = c("percentile", "austin"),
-    rate_used = c(results_main$percentile$factor_value, results_austin$austin$factor_value)
-  ),
-  "Outputs/counterfactual_metadata.csv"
-)
-
-#===============================================================================
-# CONTINUOUS COUNTERFACTUAL SWEEP FOR VISUALIZATION
-#===============================================================================
-
-#-------------------------------------------------------------------------------
-# Function to run counterfactual at a specific permitting rate
-#-------------------------------------------------------------------------------
-run_cf_at_rate <- function(cf_prep, target_rate, cities_in_cf) {
-  # Apply the target rate to affected cities (using pmax to only raise rates)
-  perm_rate_cf <- cf_prep$data %>%
-    mutate(
-      rate = if_else(
-        in_counterfact == 1,
-        pmax(bua_perm_rate_01_21, target_rate),
-        bua_perm_rate_01_21
-      )
-    ) %>%
-    pull(rate)
-  
-  # Run the counterfactual
-  result <- run_single_counterfactual(cf_prep, perm_rate_cf, target_rate, factor_change = FALSE)
-  
-  # Extract city-level results for affected cities
-  city_results <- result$data %>%
-    filter(in_counterfact == 1) %>%
-    select(BUA22NM, bua_21_pop, bua_21_pop_counterfact, pct_chg_y, pct_chg_c) %>%
-    mutate(
-      target_rate = target_rate,
-      pct_chg_pop = 100 * (bua_21_pop_counterfact - bua_21_pop) / bua_21_pop
-    )
-  
-  # Extract aggregate metrics
-  aggregate_results <- tibble(
-    target_rate = target_rate,
-    pct_chg_y_tot = result$welfare$pct_chg_y_tot,
-    pct_chg_c_tot = result$welfare$pct_chg_c_tot,
-    pct_chg_c_newcomers = result$welfare$pct_chg_c_rur,
-    pct_chg_pop_rur = result$welfare$pct_chg_pop_rur
-  )
-  
-  list(
-    city = city_results,
-    aggregate = aggregate_results
-  )
+message("\nCity sets:")
+for (nm in names(cities_sets)) {
+  message(sprintf("  %s: %s", nm, paste(cities_sets[[nm]], collapse = ", ")))
 }
 
 #-------------------------------------------------------------------------------
-# Calculate key reference values
+# Calculate reference rates
 #-------------------------------------------------------------------------------
+austin_rate <- calculate_austin_perm_rate()
+all_perm_rates <- city_data$bua_perm_rate_01_21
 
-# Prepare the base counterfactual data
-cf_prep_viz <- prepare_counterfactual_data(city_data, cities_sets$top_10, params_default, pop_totals)
+pct_75 <- quantile(all_perm_rates, 0.75)
+pct_95 <- quantile(all_perm_rates, 0.95)
+max_uk_rate <- max(all_perm_rates)
 
-# Calculate percentiles and reference rates
-perm_rates_all <- cf_prep_viz$data$bua_perm_rate_01_21
-
-reference_rates <- tibble(
-  label = c("75th pct", "90th pct", "95th pct", "99th pct", "Max UK", "Austin, TX"),
-  rate = c(
-    quantile(perm_rates_all, 0.75),
-    quantile(perm_rates_all, 0.90),
-    quantile(perm_rates_all, 0.95),
-    quantile(perm_rates_all, 0.99),
-    max(perm_rates_all),
-    calculate_austin_perm_rate()
-  )
-)
-
-# Find the city with max permitting rate
-max_perm_city <- cf_prep_viz$data %>%
-  filter(bua_perm_rate_01_21 == max(bua_perm_rate_01_21)) %>%
+city_at_75 <- city_data %>% 
+  filter(bua_perm_rate_01_21 >= pct_75) %>% 
+  slice_min(bua_perm_rate_01_21, n = 1, with_ties = TRUE) %>%
+  slice_max(bua_21_pop, n = 1, with_ties = FALSE) %>% 
   pull(BUA22NM)
 
-reference_rates$label[reference_rates$label == "Max UK"] <- paste0("Max UK (", max_perm_city, ")")
+city_at_95 <- city_data %>% 
+  filter(bua_perm_rate_01_21 >= pct_95) %>% 
+  slice_min(bua_perm_rate_01_21, n = 1, with_ties = TRUE) %>%
+  slice_max(bua_21_pop, n = 1, with_ties = FALSE) %>% 
+  pull(BUA22NM)
 
-message("Reference rates:")
+city_at_max <- city_data %>% 
+  filter(bua_perm_rate_01_21 == max_uk_rate) %>% 
+  slice_max(bua_21_pop, n = 1, with_ties = FALSE) %>% 
+  pull(BUA22NM)
+
+reference_rates <- tibble(
+  label = c(
+    sprintf("75th pct (%s)", city_at_75),
+    sprintf("95th pct (%s)", city_at_95),
+    sprintf("UK Max (%s)", city_at_max),
+    "Austin, TX"
+  ),
+  rate = c(pct_75, pct_95, max_uk_rate, austin_rate)
+)
+
+message("\nReference rates:")
 print(reference_rates)
 
 #-------------------------------------------------------------------------------
-# Run sweep across permitting rates
+# Permitting rate sweep range
 #-------------------------------------------------------------------------------
-
-# Define the range: from 75th percentile to slightly beyond Austin
-rate_min <- quantile(perm_rates_all, 0.75)
-rate_max <- reference_rates$rate[reference_rates$label == "Austin, TX"] * 1.05  # 5% beyond Austin
+rate_start <- floor(pct_75 * 100) / 100
+rate_end <- 0.13
 rate_increment <- 0.001
+rate_sequence <- seq(rate_start, rate_end, by = rate_increment)
 
-rate_sequence <- seq(rate_min, rate_max, by = rate_increment)
-message(sprintf("Running %d counterfactual scenarios...", length(rate_sequence)))
+message(sprintf("\nPermitting rate sweep: %.4f to %.4f by %.4f (%d values)", 
+                rate_start, rate_end, rate_increment, length(rate_sequence)))
 
-# Initialize storage
-city_results_list <- vector("list", length(rate_sequence))
-aggregate_results_list <- vector("list", length(rate_sequence))
-
-# Run the sweep (this may take a few minutes)
-pb <- txtProgressBar(min = 0, max = length(rate_sequence), style = 3)
-for (i in seq_along(rate_sequence)) {
-  result <- run_cf_at_rate(cf_prep_viz, rate_sequence[i], cities_sets$top_10)
-  city_results_list[[i]] <- result$city
-  aggregate_results_list[[i]] <- result$aggregate
-  setTxtProgressBar(pb, i)
+#-------------------------------------------------------------------------------
+# STEP 1: Find extreme parameter combinations at a single test rate
+#-------------------------------------------------------------------------------
+identify_extreme_params <- function(cities_in_cf, param_grid, test_rate, pop_totals) {
+  
+  results <- map_dfr(1:nrow(param_grid), function(p) {
+    params <- list(
+      gamma = param_grid$gamma[p],
+      theta = param_grid$theta[p],
+      sigma = param_grid$sigma[p],
+      beta = param_grid$beta[p],
+      lambda = param_grid$lambda[p]
+    )
+    
+    cf_prep <- prepare_counterfactual_data(city_data, cities_in_cf, params, pop_totals)
+    
+    perm_rate_cf <- cf_prep$data %>%
+      mutate(rate = if_else(in_counterfact == 1, pmax(bua_perm_rate_01_21, test_rate), bua_perm_rate_01_21)) %>%
+      pull(rate)
+    
+    result <- run_single_counterfactual(cf_prep, perm_rate_cf)
+    
+    treated <- result$data %>% filter(in_counterfact == 1, !is.na(pct_chg_y))
+    pct_chg_y_cities <- if (nrow(treated) > 0) {
+      sum(treated$pct_chg_y * treated$bua_21_pop) / sum(treated$bua_21_pop)
+    } else NA_real_
+    
+    tibble(
+      param_idx = p,
+      pct_chg_newcomer_cons = result$welfare$pct_chg_c_rur,
+      pct_chg_national_gdp = result$welfare$pct_chg_y_tot,
+      pct_chg_city_income = pct_chg_y_cities
+    )
+  })
+  
+  # Identify which param_idx gives max/min for each metric
+  list(
+    newcomer_cons_max_idx = results$param_idx[which.max(results$pct_chg_newcomer_cons)],
+    newcomer_cons_min_idx = results$param_idx[which.min(results$pct_chg_newcomer_cons)],
+    national_gdp_max_idx = results$param_idx[which.max(results$pct_chg_national_gdp)],
+    national_gdp_min_idx = results$param_idx[which.min(results$pct_chg_national_gdp)],
+    city_income_max_idx = results$param_idx[which.max(results$pct_chg_city_income)],
+    city_income_min_idx = results$param_idx[which.min(results$pct_chg_city_income)]
+  )
 }
-close(pb)
-
-# Combine into dataframes
-city_sweep_results <- bind_rows(city_results_list)
-aggregate_sweep_results <- bind_rows(aggregate_results_list)
-
-message("Sweep complete.")
 
 #-------------------------------------------------------------------------------
-# Plot 1: Income changes by city + newcomer consumption
+# STEP 2: Run sweep for just 3 param sets (central, max, min) per metric
 #-------------------------------------------------------------------------------
-
-# Get top 10 cities ordered by population for consistent legend
-top_10_ordered <- cf_prep_viz$data %>%
-  filter(in_counterfact == 1) %>%
-  arrange(desc(bua_21_pop)) %>%
-  pull(BUA22NM)
-
-# Set factor levels for consistent ordering
-city_sweep_results <- city_sweep_results %>%
-  mutate(BUA22NM = factor(BUA22NM, levels = top_10_ordered))
-
-# Determine scaling factor for secondary axis
-# We want newcomer consumption change to be visually comparable to city income changes
-max_y_income <- max(city_sweep_results$pct_chg_y, na.rm = TRUE)
-max_newcomer <- max(aggregate_sweep_results$pct_chg_c_newcomers, na.rm = TRUE)
-scale_factor <- max_y_income / max_newcomer
-
-# Create the plot
-income_plot <- ggplot() +
-  # City income lines
-  geom_line(
-    data = city_sweep_results,
-    aes(x = target_rate, y = pct_chg_y, color = BUA22NM),
-    linewidth = 0.8
-  ) +
-  # Newcomer consumption (scaled to secondary axis)
-  geom_line(
-    data = aggregate_sweep_results,
-    aes(x = target_rate, y = pct_chg_c_newcomers * scale_factor),
-    color = "black", linewidth = 1.2, linetype = "dashed"
-  ) +
-  # Vertical reference lines
-  geom_vline(
-    data = reference_rates,
-    aes(xintercept = rate),
-    linetype = "dotted", color = "gray40", linewidth = 0.5
-  ) +
-  # Labels for reference lines
-  geom_text(
-    data = reference_rates,
-    aes(x = rate, y = max_y_income * 0.95, label = label),
-    angle = 90, hjust = 1, vjust = -0.3, size = 2.5, color = "gray30"
-  ) +
-  # Scales
-  scale_y_continuous(
-    name = "% change in city income",
-    sec.axis = sec_axis(~ . / scale_factor, name = "% change in newcomer consumption")
-  ) +
-  scale_x_continuous(
-    name = "Counterfactual permitting rate",
-    labels = scales::number_format(accuracy = 0.01)
-  ) +
-  scale_color_brewer(palette = "Paired", name = "City") +
-  # Theme
-  theme_minimal() +
-  theme(
-    legend.position = "right",
-    legend.text = element_text(size = 8),
-    axis.title.y.right = element_text(color = "black"),
-    panel.grid.minor = element_blank()
-  ) +
-  labs(
-    title = "Counterfactual income gains from relaxed permitting",
-    subtitle = "Dashed line: newcomer consumption change (right axis)",
-    caption = "Parameters: σ+β = 0.08, γ+θ = 0.11, λ = 0.18"
+run_optimized_sweep <- function(city_set_name, cities_in_cf, param_grid, rate_sequence, 
+                                pop_totals, extreme_indices) {
+  
+  message(sprintf("\n=== Running optimized sweep for: %s ===", city_set_name))
+  
+  # Unique param indices needed (central + extremes for all metrics)
+  central_idx <- which(
+    param_grid$gamma == central_params$gamma &
+      param_grid$theta == central_params$theta &
+      param_grid$sigma == central_params$sigma &
+      param_grid$beta == central_params$beta &
+      param_grid$lambda == central_params$lambda
   )
-
-print(income_plot)
-
-ggsave(
-  "Outputs/cf_income_by_permitting_rate.png",
-  income_plot,
-  width = 28, height = 16, units = "cm", dpi = 320
-)
-
-#-------------------------------------------------------------------------------
-# Plot 2: Population changes by city
-#-------------------------------------------------------------------------------
-
-# For population changes, I recommend a heatmap or faceted area chart
-# A heatmap works well because we have two dimensions (city × rate) and want to show magnitude
-
-# Option A: Faceted line chart (each city gets its own panel)
-pop_change_faceted <- ggplot(city_sweep_results, aes(x = target_rate, y = pct_chg_pop)) +
-  geom_line(aes(color = BUA22NM), linewidth = 0.8, show.legend = FALSE) +
-  geom_area(aes(fill = BUA22NM), alpha = 0.3, show.legend = FALSE) +
-  geom_vline(
-    data = reference_rates,
-    aes(xintercept = rate),
-    linetype = "dotted", color = "gray40", linewidth = 0.4
-  ) +
-  facet_wrap(~ BUA22NM, scales = "free_y", ncol = 2) +
-  scale_x_continuous(
-    name = "Counterfactual permitting rate",
-    labels = scales::number_format(accuracy = 0.01)
-  ) +
-  scale_y_continuous(
-    name = "% change in city population",
-    labels = scales::percent_format(scale = 1)
-  ) +
-  scale_color_brewer(palette = "Paired") +
-  scale_fill_brewer(palette = "Paired") +
-  theme_minimal() +
-  theme(
-    strip.text = element_text(size = 9, face = "bold"),
-    panel.grid.minor = element_blank(),
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 7)
-  ) +
-  labs(
-    title = "Counterfactual population growth from relaxed permitting",
-    subtitle = "Each panel shows one city; vertical lines mark reference rates",
-    caption = "Parameters: σ+β = 0.08, γ+θ = 0.11, λ = 0.18"
+  
+  unique_indices <- unique(c(
+    central_idx,
+    extreme_indices$newcomer_cons_max_idx,
+    extreme_indices$newcomer_cons_min_idx,
+    extreme_indices$national_gdp_max_idx,
+    extreme_indices$national_gdp_min_idx,
+    extreme_indices$city_income_max_idx,
+    extreme_indices$city_income_min_idx
+  ))
+  
+  message(sprintf("  Running %d unique parameter sets × %d rates = %d evaluations",
+                  length(unique_indices), length(rate_sequence), 
+                  length(unique_indices) * length(rate_sequence)))
+  
+  results <- vector("list", length(unique_indices) * length(rate_sequence))
+  idx <- 0
+  
+  pb <- txtProgressBar(min = 0, max = length(unique_indices) * length(rate_sequence), style = 3)
+  
+  for (p in unique_indices) {
+    params <- list(
+      gamma = param_grid$gamma[p],
+      theta = param_grid$theta[p],
+      sigma = param_grid$sigma[p],
+      beta = param_grid$beta[p],
+      lambda = param_grid$lambda[p]
+    )
+    
+    cf_prep <- prepare_counterfactual_data(city_data, cities_in_cf, params, pop_totals)
+    
+    for (r in seq_along(rate_sequence)) {
+      target_rate <- rate_sequence[r]
+      
+      perm_rate_cf <- cf_prep$data %>%
+        mutate(rate = if_else(in_counterfact == 1, pmax(bua_perm_rate_01_21, target_rate), bua_perm_rate_01_21)) %>%
+        pull(rate)
+      
+      result <- run_single_counterfactual(cf_prep, perm_rate_cf)
+      
+      treated <- result$data %>% filter(in_counterfact == 1, !is.na(pct_chg_y))
+      pct_chg_y_cities <- if (nrow(treated) > 0) {
+        sum(treated$pct_chg_y * treated$bua_21_pop) / sum(treated$bua_21_pop)
+      } else NA_real_
+      
+      idx <- idx + 1
+      results[[idx]] <- tibble(
+        param_idx = p,
+        is_central = (p == central_idx),
+        target_rate = target_rate,
+        pct_chg_newcomer_cons = result$welfare$pct_chg_c_rur,
+        pct_chg_national_gdp = result$welfare$pct_chg_y_tot,
+        pct_chg_city_income = pct_chg_y_cities
+      )
+      
+      setTxtProgressBar(pb, idx)
+    }
+  }
+  close(pb)
+  
+  all_results <- bind_rows(results)
+  
+  # Reshape into fan format
+  fan_data <- tibble(target_rate = rate_sequence) %>%
+    left_join(
+      all_results %>% filter(is_central) %>% 
+        select(target_rate, nc_central = pct_chg_newcomer_cons, 
+               gdp_central = pct_chg_national_gdp, ci_central = pct_chg_city_income),
+      by = "target_rate"
+    ) %>%
+    left_join(
+      all_results %>% filter(param_idx == extreme_indices$newcomer_cons_max_idx) %>%
+        select(target_rate, nc_max = pct_chg_newcomer_cons),
+      by = "target_rate"
+    ) %>%
+    left_join(
+      all_results %>% filter(param_idx == extreme_indices$newcomer_cons_min_idx) %>%
+        select(target_rate, nc_min = pct_chg_newcomer_cons),
+      by = "target_rate"
+    ) %>%
+    left_join(
+      all_results %>% filter(param_idx == extreme_indices$national_gdp_max_idx) %>%
+        select(target_rate, gdp_max = pct_chg_national_gdp),
+      by = "target_rate"
+    ) %>%
+    left_join(
+      all_results %>% filter(param_idx == extreme_indices$national_gdp_min_idx) %>%
+        select(target_rate, gdp_min = pct_chg_national_gdp),
+      by = "target_rate"
+    ) %>%
+    left_join(
+      all_results %>% filter(param_idx == extreme_indices$city_income_max_idx) %>%
+        select(target_rate, ci_max = pct_chg_city_income),
+      by = "target_rate"
+    ) %>%
+    left_join(
+      all_results %>% filter(param_idx == extreme_indices$city_income_min_idx) %>%
+        select(target_rate, ci_min = pct_chg_city_income),
+      by = "target_rate"
+    ) %>%
+    mutate(city_set = city_set_name)
+  
+  list(
+    fan_data = fan_data,
+    extreme_indices = extreme_indices,
+    central_idx = central_idx
   )
-
-print(pop_change_faceted)
-
-ggsave(
-  "Outputs/cf_population_by_permitting_rate_faceted.png",
-  pop_change_faceted,
-  width = 24, height = 28, units = "cm", dpi = 320
-)
-
-# Option B: Heatmap (compact view of all cities at once)
-# Bin the rates to reduce visual noise
-city_sweep_binned <- city_sweep_results %>%
-  mutate(rate_bin = cut(target_rate, breaks = 50, labels = FALSE)) %>%
-  group_by(BUA22NM, rate_bin) %>%
-  summarise(
-    target_rate = mean(target_rate),
-    pct_chg_pop = mean(pct_chg_pop),
-    .groups = "drop"
-  )
-
-pop_change_heatmap <- ggplot(city_sweep_binned, aes(x = target_rate, y = BUA22NM, fill = pct_chg_pop)) +
-  geom_tile() +
-  geom_vline(
-    data = reference_rates,
-    aes(xintercept = rate),
-    linetype = "dashed", color = "white", linewidth = 0.6
-  ) +
-  scale_fill_viridis_c(
-    name = "% pop\nchange",
-    option = "plasma",
-    labels = scales::percent_format(scale = 1)
-  ) +
-  scale_x_continuous(
-    name = "Counterfactual permitting rate",
-    labels = scales::number_format(accuracy = 0.01)
-  ) +
-  scale_y_discrete(name = NULL, limits = rev(top_10_ordered)) +  # largest at top
-  theme_minimal() +
-  theme(
-    panel.grid = element_blank(),
-    axis.text.y = element_text(size = 9)
-  ) +
-  labs(
-    title = "Population growth intensity across cities and permitting rates",
-    subtitle = "Dashed lines mark reference rates (75th pct, 90th, 95th, 99th, Max UK, Austin)",
-    caption = "Parameters: σ+β = 0.08, γ+θ = 0.11, λ = 0.18"
-  )
-
-print(pop_change_heatmap)
-
-ggsave(
-  "Outputs/cf_population_heatmap.png",
-  pop_change_heatmap,
-  width = 24, height = 14, units = "cm", dpi = 320
-)
+}
 
 #-------------------------------------------------------------------------------
-# Save sweep data for later use
+# Run for all city sets
 #-------------------------------------------------------------------------------
-write_csv(city_sweep_results, "Outputs/cf_sweep_city_results.csv")
-write_csv(aggregate_sweep_results, "Outputs/cf_sweep_aggregate_results.csv")
-write_csv(reference_rates, "Outputs/cf_reference_rates.csv")
+test_rate <- mean(c(rate_start, rate_end))  # midpoint for identification
 
-message("\n=== Visualization complete ===\n")
+all_fan_data <- list()
+all_extreme_params <- list()
+
+for (cs in names(cities_sets)) {
+  message(sprintf("\n>>> Processing city set: %s", cs))
+  
+  # Step 1: identify extremes
+  message("  Identifying extreme parameter combinations...")
+  extreme_idx <- identify_extreme_params(cities_sets[[cs]], param_grid, test_rate, pop_totals)
+  all_extreme_params[[cs]] <- extreme_idx
+  
+  # Log the extreme params
+  message(sprintf("  Newcomer cons max: γ=%.2f,θ=%.2f,σ=%.3f,β=%.2f,λ=%.2f",
+                  param_grid$gamma[extreme_idx$newcomer_cons_max_idx],
+                  param_grid$theta[extreme_idx$newcomer_cons_max_idx],
+                  param_grid$sigma[extreme_idx$newcomer_cons_max_idx],
+                  param_grid$beta[extreme_idx$newcomer_cons_max_idx],
+                  param_grid$lambda[extreme_idx$newcomer_cons_max_idx]))
+  message(sprintf("  Newcomer cons min: γ=%.2f,θ=%.2f,σ=%.3f,β=%.2f,λ=%.2f",
+                  param_grid$gamma[extreme_idx$newcomer_cons_min_idx],
+                  param_grid$theta[extreme_idx$newcomer_cons_min_idx],
+                  param_grid$sigma[extreme_idx$newcomer_cons_min_idx],
+                  param_grid$beta[extreme_idx$newcomer_cons_min_idx],
+                  param_grid$lambda[extreme_idx$newcomer_cons_min_idx]))
+  # quick check
+  message("GDP max: ", paste(param_grid[extreme_idx$national_gdp_max_idx, ], collapse=", "))
+  message("GDP min: ", paste(param_grid[extreme_idx$national_gdp_min_idx, ], collapse=", "))
+  message("City income max: ", paste(param_grid[extreme_idx$city_income_max_idx, ], collapse=", "))
+  message("City income min: ", paste(param_grid[extreme_idx$city_income_min_idx, ], collapse=", "))
+  
+  # Step 2: run optimized sweep
+  sweep_result <- run_optimized_sweep(cs, cities_sets[[cs]], param_grid, rate_sequence, 
+                                      pop_totals, extreme_idx)
+  all_fan_data[[cs]] <- sweep_result$fan_data
+}
+
+fan_summary <- bind_rows(all_fan_data)
+
+message("\nSweep complete. Total observations: ", nrow(fan_summary))
+
+write_csv(fan_summary, "Outputs/fan_chart_summary.csv")
 
 #===============================================================================
-# PLOTS AND REGRESSIONS
+# PLOTTING
 #===============================================================================
 
-message("\n=== Generating plots and regressions ===\n")
+message("\n=== GENERATING FAN CHARTS ===\n")
 
-plot_data <- cf_prep_main$data
+fan_color <- "#1f77b4"
 
-top_10_buas <- plot_data %>%
-  arrange(desc(bua_21_pop)) %>%
-  slice_head(n = 10)
-
-# Plot 1: Permitting rate vs city population
-perm_rate_vs_city_pop <- ggplot(plot_data, aes(x = bua_21_pop, y = 1/bua_perm_rate_01_21)) +
-  geom_point(alpha = 0.5) +
-  geom_smooth(method = "lm", color = "blue", se = FALSE) +
-  geom_text_repel(
-    data = top_10_buas,
-    aes(label = BUA22NM),
-    size = 3.5, box.padding = 0.5, point.padding = 0.2, force = 10
-  ) +
-  labs(
-    x = "2021 population (log scale)",
-    y = "Reciprocal of permitting rate\n(2001-2021)"
-  ) +
-  theme_minimal() +
-  scale_x_log10()
-
-# Plot 2: Geographic constraint vs permitting rate
-geog_constr_vs_perm_rate <- ggplot(plot_data, aes(x = 1 - 1/geographic_constraint, y = 1/bua_perm_rate_01_21)) +
-  geom_point(alpha = 0.5) +
-  geom_smooth(method = "lm", color = "blue", se = FALSE) +
-  geom_text_repel(
-    data = top_10_buas,
-    aes(label = BUA22NM),
-    size = 3.5, box.padding = 0.5, point.padding = 0.2, force = 10
-  ) +
-  labs(
-    x = "Estimated % geographically-constrained land (log scale)",
-    y = "Reciprocal of permitting rate\n(2001-2021)"
-  ) +
-  theme_minimal() +
-  scale_x_log10(labels = scales::percent)
-
-ggsave("Outputs/perm_rate_vs_city_pop.png", perm_rate_vs_city_pop, units = "cm", width = 16, height = 12, dpi = 320)
-ggsave("Outputs/geog_constr_vs_perm_rate.png", geog_constr_vs_perm_rate, units = "cm", width = 16, height = 12, dpi = 320)
-
-# Regressions
-reg1 <- lm(I(1/bua_perm_rate_01_21) ~ log(bua_21_pop), data = plot_data)
-reg2 <- lm(I(1/bua_perm_rate_01_21) ~ log(1 - 1/geographic_constraint), data = plot_data)
-
-stargazer(
-  reg1, reg2,
-  title = "Empirically testing model predictions",
-  dep.var.labels = "Reciprocal of permitting rate (2001-2021)",
-  covariate.labels = c("Log population", "Log \\% of geographically constrained land", "Constant"),
-  align = TRUE,
-  model.numbers = TRUE,
-  label = "tab:reg_tab",
-  type = "latex",
-  out = "Outputs/regression_results.tex"
+city_set_labels <- c(
+  london_only = "London only",
+  top_4 = "Top 4 cities by population",
+  top_6 = "Top 6 cities by population",
+  university_cities = "London, Oxford & Cambridge"
 )
 
-message("\n=== Analysis complete ===\n")
+#-------------------------------------------------------------------------------
+# Fan chart function
+#-------------------------------------------------------------------------------
+create_fan_chart <- function(data, city_set_name, y_min, y_max, y_central, 
+                             ylabel, title_metric, filename_suffix) {
+  
+  plot_data <- data %>% filter(city_set == city_set_name)
+  
+  p <- ggplot(plot_data, aes(x = target_rate)) +
+    # Fan (ribbon) - 60% transparent
+    geom_ribbon(aes(ymin = .data[[y_min]], ymax = .data[[y_max]]), 
+                fill = fan_color, alpha = 0.6) +
+    # Central line - same color, opaque
+    geom_line(aes(y = .data[[y_central]]), color = fan_color, linewidth = 1) +
+    # Reference lines
+    geom_vline(data = reference_rates, aes(xintercept = rate), 
+               linetype = "dashed", color = "gray40", linewidth = 0.5) +
+    geom_text(data = reference_rates, aes(x = rate, y = Inf, label = label),
+              angle = 90, hjust = 1.1, vjust = -0.3, size = 2.5, color = "gray30") +
+    scale_x_continuous(
+      name = "Counterfactual permitting rate",
+      labels = scales::number_format(accuracy = 0.01)
+    ) +
+    scale_y_continuous(name = ylabel) +
+    theme_minimal() +
+    theme(
+      panel.grid.minor = element_blank(),
+      plot.title = element_text(size = 12, face = "bold"),
+      plot.subtitle = element_text(size = 9, color = "gray40")
+    ) +
+    labs(
+      title = sprintf("%s: %s", title_metric, city_set_labels[city_set_name]),
+      subtitle = "Shaded fan: parameter uncertainty | Solid line: central estimates",
+      caption = sprintf("Central: γ=%.2f, θ=%.2f, σ=%.3f, β=%.2f, λ=%.2f",
+                        central_params$gamma, central_params$theta, 
+                        central_params$sigma, central_params$beta, central_params$lambda)
+    )
+  
+  ggsave(
+    sprintf("Outputs/fan_%s_%s.png", filename_suffix, city_set_name),
+    p, width = 24, height = 14, units = "cm", dpi = 320
+  )
+  
+  p
+}
+
+#-------------------------------------------------------------------------------
+# Generate all charts
+#-------------------------------------------------------------------------------
+for (cs in names(cities_sets)) {
+  message(sprintf("Creating charts for: %s", cs))
+  
+  create_fan_chart(fan_summary, cs, "nc_min", "nc_max", "nc_central",
+                   "% change in newcomer consumption",
+                   "Change in newcomer consumption",
+                   "newcomer_cons")
+  
+  create_fan_chart(fan_summary, cs, "gdp_min", "gdp_max", "gdp_central",
+                   "% change in national GDP",
+                   "Change in national GDP",
+                   "national_gdp")
+  
+  create_fan_chart(fan_summary, cs, "ci_min", "ci_max", "ci_central",
+                   "% change in city income (treated cities)",
+                   "Change in city income",
+                   "city_income")
+}
+
+message("\n=== ALL CHARTS GENERATED ===\n")
+
+write_csv(reference_rates, "Outputs/reference_rates.csv")
+
+message("Results saved to Outputs/")
+message("=== ANALYSIS COMPLETE ===")
