@@ -954,14 +954,13 @@ identify_extreme_params <- function(cities_in_cf, param_grid, test_rate, pop_tot
 }
 
 #-------------------------------------------------------------------------------
-# STEP 2: Run sweep for just 3 param sets (central, max, min) per metric
+# STEP 2: Run sweep - now capturing city-level data
 #-------------------------------------------------------------------------------
 run_optimized_sweep <- function(city_set_name, cities_in_cf, param_grid, rate_sequence, 
                                 pop_totals, extreme_indices) {
   
   message(sprintf("\n=== Running optimized sweep for: %s ===", city_set_name))
   
-  # Unique param indices needed (central + extremes for all metrics)
   central_idx <- which(
     param_grid$gamma == central_params$gamma &
       param_grid$theta == central_params$theta &
@@ -984,8 +983,13 @@ run_optimized_sweep <- function(city_set_name, cities_in_cf, param_grid, rate_se
                   length(unique_indices), length(rate_sequence), 
                   length(unique_indices) * length(rate_sequence)))
   
-  results <- vector("list", length(unique_indices) * length(rate_sequence))
+  # Aggregate results
+  agg_results <- vector("list", length(unique_indices) * length(rate_sequence))
+  # City-level results (central params only)
+  city_results <- vector("list", length(rate_sequence))
+  
   idx <- 0
+  city_idx <- 0
   
   pb <- txtProgressBar(min = 0, max = length(unique_indices) * length(rate_sequence), style = 3)
   
@@ -1015,7 +1019,7 @@ run_optimized_sweep <- function(city_set_name, cities_in_cf, param_grid, rate_se
       } else NA_real_
       
       idx <- idx + 1
-      results[[idx]] <- tibble(
+      agg_results[[idx]] <- tibble(
         param_idx = p,
         is_central = (p == central_idx),
         target_rate = target_rate,
@@ -1024,48 +1028,57 @@ run_optimized_sweep <- function(city_set_name, cities_in_cf, param_grid, rate_se
         pct_chg_city_income = pct_chg_y_cities
       )
       
+      # Store city-level data for central params only
+      if (p == central_idx) {
+        city_idx <- city_idx + 1
+        city_results[[city_idx]] <- treated %>%
+          select(BUA22NM, bua_21_pop, pct_chg_y) %>%
+          mutate(target_rate = target_rate)
+      }
+      
       setTxtProgressBar(pb, idx)
     }
   }
   close(pb)
   
-  all_results <- bind_rows(results)
+  all_agg_results <- bind_rows(agg_results)
+  all_city_results <- bind_rows(city_results) %>% mutate(city_set = city_set_name)
   
-  # Reshape into fan format
+  # Reshape aggregate into fan format (same as before)
   fan_data <- tibble(target_rate = rate_sequence) %>%
     left_join(
-      all_results %>% filter(is_central) %>% 
+      all_agg_results %>% filter(is_central) %>% 
         select(target_rate, nc_central = pct_chg_newcomer_cons, 
                gdp_central = pct_chg_national_gdp, ci_central = pct_chg_city_income),
       by = "target_rate"
     ) %>%
     left_join(
-      all_results %>% filter(param_idx == extreme_indices$newcomer_cons_max_idx) %>%
+      all_agg_results %>% filter(param_idx == extreme_indices$newcomer_cons_max_idx) %>%
         select(target_rate, nc_max = pct_chg_newcomer_cons),
       by = "target_rate"
     ) %>%
     left_join(
-      all_results %>% filter(param_idx == extreme_indices$newcomer_cons_min_idx) %>%
+      all_agg_results %>% filter(param_idx == extreme_indices$newcomer_cons_min_idx) %>%
         select(target_rate, nc_min = pct_chg_newcomer_cons),
       by = "target_rate"
     ) %>%
     left_join(
-      all_results %>% filter(param_idx == extreme_indices$national_gdp_max_idx) %>%
+      all_agg_results %>% filter(param_idx == extreme_indices$national_gdp_max_idx) %>%
         select(target_rate, gdp_max = pct_chg_national_gdp),
       by = "target_rate"
     ) %>%
     left_join(
-      all_results %>% filter(param_idx == extreme_indices$national_gdp_min_idx) %>%
+      all_agg_results %>% filter(param_idx == extreme_indices$national_gdp_min_idx) %>%
         select(target_rate, gdp_min = pct_chg_national_gdp),
       by = "target_rate"
     ) %>%
     left_join(
-      all_results %>% filter(param_idx == extreme_indices$city_income_max_idx) %>%
+      all_agg_results %>% filter(param_idx == extreme_indices$city_income_max_idx) %>%
         select(target_rate, ci_max = pct_chg_city_income),
       by = "target_rate"
     ) %>%
     left_join(
-      all_results %>% filter(param_idx == extreme_indices$city_income_min_idx) %>%
+      all_agg_results %>% filter(param_idx == extreme_indices$city_income_min_idx) %>%
         select(target_rate, ci_min = pct_chg_city_income),
       by = "target_rate"
     ) %>%
@@ -1073,28 +1086,28 @@ run_optimized_sweep <- function(city_set_name, cities_in_cf, param_grid, rate_se
   
   list(
     fan_data = fan_data,
+    city_data = all_city_results,  # NEW: city-level trajectories
     extreme_indices = extreme_indices,
     central_idx = central_idx
   )
 }
 
 #-------------------------------------------------------------------------------
-# Run for all city sets
+# Run for all city sets (modified to capture city data)
 #-------------------------------------------------------------------------------
-test_rate <- mean(c(rate_start, rate_end))  # midpoint for identification
+test_rate <- mean(c(rate_start, rate_end))
 
 all_fan_data <- list()
+all_city_data <- list()  # NEW
 all_extreme_params <- list()
 
 for (cs in names(cities_sets)) {
   message(sprintf("\n>>> Processing city set: %s", cs))
   
-  # Step 1: identify extremes
   message("  Identifying extreme parameter combinations...")
   extreme_idx <- identify_extreme_params(cities_sets[[cs]], param_grid, test_rate, pop_totals)
   all_extreme_params[[cs]] <- extreme_idx
   
-  # Log the extreme params
   message(sprintf("  Newcomer cons max: γ=%.2f,θ=%.2f,σ=%.3f,β=%.2f,λ=%.2f",
                   param_grid$gamma[extreme_idx$newcomer_cons_max_idx],
                   param_grid$theta[extreme_idx$newcomer_cons_max_idx],
@@ -1107,23 +1120,26 @@ for (cs in names(cities_sets)) {
                   param_grid$sigma[extreme_idx$newcomer_cons_min_idx],
                   param_grid$beta[extreme_idx$newcomer_cons_min_idx],
                   param_grid$lambda[extreme_idx$newcomer_cons_min_idx]))
-  # quick check
   message("GDP max: ", paste(param_grid[extreme_idx$national_gdp_max_idx, ], collapse=", "))
   message("GDP min: ", paste(param_grid[extreme_idx$national_gdp_min_idx, ], collapse=", "))
   message("City income max: ", paste(param_grid[extreme_idx$city_income_max_idx, ], collapse=", "))
   message("City income min: ", paste(param_grid[extreme_idx$city_income_min_idx, ], collapse=", "))
   
-  # Step 2: run optimized sweep
   sweep_result <- run_optimized_sweep(cs, cities_sets[[cs]], param_grid, rate_sequence, 
                                       pop_totals, extreme_idx)
   all_fan_data[[cs]] <- sweep_result$fan_data
+  all_city_data[[cs]] <- sweep_result$city_data  # NEW
 }
 
 fan_summary <- bind_rows(all_fan_data)
+city_summary <- bind_rows(all_city_data)  # NEW
 
-message("\nSweep complete. Total observations: ", nrow(fan_summary))
+message("\nSweep complete.")
+message(sprintf("  Aggregate observations: %d", nrow(fan_summary)))
+message(sprintf("  City-level observations: %d", nrow(city_summary)))
 
 write_csv(fan_summary, "Outputs/fan_chart_summary.csv")
+write_csv(city_summary, "Outputs/city_level_results.csv")  # NEW
 
 #===============================================================================
 # PLOTTING
@@ -1137,11 +1153,12 @@ city_set_labels <- c(
   london_only = "London only",
   top_4 = "Top 4 cities by population",
   top_6 = "Top 6 cities by population",
-  university_cities = "London, Oxford & Cambridge"
+  university_cities = "London, Oxford & Cambridge",
+  top_10 = "Top 10 cities by population"
 )
 
 #-------------------------------------------------------------------------------
-# Fan chart function
+# Fan chart function (unchanged - for newcomer cons and GDP)
 #-------------------------------------------------------------------------------
 create_fan_chart <- function(data, city_set_name, y_min, y_max, y_central, 
                              ylabel, title_metric, filename_suffix) {
@@ -1149,12 +1166,9 @@ create_fan_chart <- function(data, city_set_name, y_min, y_max, y_central,
   plot_data <- data %>% filter(city_set == city_set_name)
   
   p <- ggplot(plot_data, aes(x = target_rate)) +
-    # Fan (ribbon) - 60% transparent
     geom_ribbon(aes(ymin = .data[[y_min]], ymax = .data[[y_max]]), 
                 fill = fan_color, alpha = 0.6) +
-    # Central line - same color, opaque
     geom_line(aes(y = .data[[y_central]]), color = fan_color, linewidth = 1) +
-    # Reference lines
     geom_vline(data = reference_rates, aes(xintercept = rate), 
                linetype = "dashed", color = "gray40", linewidth = 0.5) +
     geom_text(data = reference_rates, aes(x = rate, y = Inf, label = label),
@@ -1187,25 +1201,85 @@ create_fan_chart <- function(data, city_set_name, y_min, y_max, y_central,
 }
 
 #-------------------------------------------------------------------------------
+# NEW: City income chart with individual city lines
+#-------------------------------------------------------------------------------
+create_city_income_chart <- function(city_data, city_set_name) {
+  
+  plot_data <- city_data %>% filter(city_set == city_set_name)
+  
+  # Order cities by population for legend
+  city_order <- plot_data %>%
+    distinct(BUA22NM, bua_21_pop) %>%
+    arrange(desc(bua_21_pop)) %>%
+    pull(BUA22NM)
+  
+  plot_data <- plot_data %>%
+    mutate(BUA22NM = factor(BUA22NM, levels = city_order))
+  
+  # Color palette - use a qualitative palette that works for up to 10 cities
+  n_cities <- length(city_order)
+  if (n_cities <= 8) {
+    colors <- RColorBrewer::brewer.pal(max(3, n_cities), "Set2")
+  } else {
+    colors <- scales::hue_pal()(n_cities)
+  }
+  
+  p <- ggplot(plot_data, aes(x = target_rate, y = pct_chg_y, color = BUA22NM)) +
+    geom_line(linewidth = 0.8) +
+    geom_vline(data = reference_rates, aes(xintercept = rate), 
+               linetype = "dashed", color = "gray40", linewidth = 0.5) +
+    geom_text(data = reference_rates, aes(x = rate, y = Inf, label = label),
+              angle = 90, hjust = 1.1, vjust = -0.3, size = 2.5, color = "gray30",
+              inherit.aes = FALSE) +
+    scale_x_continuous(
+      name = "Counterfactual permitting rate",
+      labels = scales::number_format(accuracy = 0.01)
+    ) +
+    scale_y_continuous(name = "% change in city income") +
+    scale_color_manual(values = colors, name = "City") +
+    theme_minimal() +
+    theme(
+      panel.grid.minor = element_blank(),
+      plot.title = element_text(size = 12, face = "bold"),
+      plot.subtitle = element_text(size = 9, color = "gray40"),
+      legend.position = "right"
+    ) +
+    labs(
+      title = sprintf("Change in city income: %s", city_set_labels[city_set_name]),
+      subtitle = "Each line shows income change for one city (central parameter estimates)",
+      caption = sprintf("Central: γ=%.2f, θ=%.2f, σ=%.3f, β=%.2f, λ=%.2f",
+                        central_params$gamma, central_params$theta, 
+                        central_params$sigma, central_params$beta, central_params$lambda)
+    )
+  
+  ggsave(
+    sprintf("Outputs/fan_city_income_%s.png", city_set_name),
+    p, width = 26, height = 14, units = "cm", dpi = 320
+  )
+  
+  p
+}
+
+#-------------------------------------------------------------------------------
 # Generate all charts
 #-------------------------------------------------------------------------------
 for (cs in names(cities_sets)) {
   message(sprintf("Creating charts for: %s", cs))
   
+  # Newcomer consumption - fan chart
   create_fan_chart(fan_summary, cs, "nc_min", "nc_max", "nc_central",
                    "% change in newcomer consumption",
                    "Change in newcomer consumption",
                    "newcomer_cons")
   
+  # National GDP - fan chart
   create_fan_chart(fan_summary, cs, "gdp_min", "gdp_max", "gdp_central",
                    "% change in national GDP",
                    "Change in national GDP",
                    "national_gdp")
   
-  create_fan_chart(fan_summary, cs, "ci_min", "ci_max", "ci_central",
-                   "% change in city income (treated cities)",
-                   "Change in city income",
-                   "city_income")
+  # City income - multi-line chart
+  create_city_income_chart(city_summary, cs)
 }
 
 message("\n=== ALL CHARTS GENERATED ===\n")
