@@ -1158,7 +1158,7 @@ city_set_labels <- c(
 )
 
 #-------------------------------------------------------------------------------
-# Fan chart function (unchanged - for newcomer cons and GDP)
+# Fan chart function
 #-------------------------------------------------------------------------------
 create_fan_chart <- function(data, city_set_name, y_min, y_max, y_central, 
                              ylabel, title_metric, filename_suffix) {
@@ -1201,13 +1201,12 @@ create_fan_chart <- function(data, city_set_name, y_min, y_max, y_central,
 }
 
 #-------------------------------------------------------------------------------
-# NEW: City income chart with individual city lines
+# City income per capita chart with individual city lines
 #-------------------------------------------------------------------------------
 create_city_income_chart <- function(city_data, city_set_name) {
   
   plot_data <- city_data %>% filter(city_set == city_set_name)
   
-  # Order cities by population for legend
   city_order <- plot_data %>%
     distinct(BUA22NM, bua_21_pop) %>%
     arrange(desc(bua_21_pop)) %>%
@@ -1216,7 +1215,6 @@ create_city_income_chart <- function(city_data, city_set_name) {
   plot_data <- plot_data %>%
     mutate(BUA22NM = factor(BUA22NM, levels = city_order))
   
-  # Color palette - use a qualitative palette that works for up to 10 cities
   n_cities <- length(city_order)
   if (n_cities <= 8) {
     colors <- RColorBrewer::brewer.pal(max(3, n_cities), "Set2")
@@ -1235,7 +1233,7 @@ create_city_income_chart <- function(city_data, city_set_name) {
       name = "Counterfactual permitting rate",
       labels = scales::number_format(accuracy = 0.01)
     ) +
-    scale_y_continuous(name = "% change in city income") +
+    scale_y_continuous(name = "% change in income per capita") +
     scale_color_manual(values = colors, name = "City") +
     theme_minimal() +
     theme(
@@ -1245,15 +1243,15 @@ create_city_income_chart <- function(city_data, city_set_name) {
       legend.position = "right"
     ) +
     labs(
-      title = sprintf("Change in city income: %s", city_set_labels[city_set_name]),
-      subtitle = "Each line shows income change for one city (central parameter estimates)",
+      title = sprintf("Change in city income per capita: %s", city_set_labels[city_set_name]),
+      subtitle = "Each line shows per capita income change for one city (central parameter estimates)",
       caption = sprintf("Central: γ=%.2f, θ=%.2f, σ=%.3f, β=%.2f, λ=%.2f",
                         central_params$gamma, central_params$theta, 
                         central_params$sigma, central_params$beta, central_params$lambda)
     )
   
   ggsave(
-    sprintf("Outputs/fan_city_income_%s.png", city_set_name),
+    sprintf("Outputs/fan_city_income_pc_%s.png", city_set_name),
     p, width = 26, height = 14, units = "cm", dpi = 320
   )
   
@@ -1266,19 +1264,19 @@ create_city_income_chart <- function(city_data, city_set_name) {
 for (cs in names(cities_sets)) {
   message(sprintf("Creating charts for: %s", cs))
   
-  # Newcomer consumption - fan chart
+  # Newcomer consumption (= rural consumption = marginal worker welfare)
   create_fan_chart(fan_summary, cs, "nc_min", "nc_max", "nc_central",
-                   "% change in newcomer consumption",
+                   "% change in consumption",
                    "Change in newcomer consumption",
                    "newcomer_cons")
   
-  # National GDP - fan chart
+  # National average income per capita (= GDP per capita since pop fixed)
   create_fan_chart(fan_summary, cs, "gdp_min", "gdp_max", "gdp_central",
-                   "% change in national GDP",
-                   "Change in national GDP",
-                   "national_gdp")
+                   "% change in income per capita",
+                   "Change in national income per capita",
+                   "national_income_pc")
   
-  # City income - multi-line chart
+  # City-level income per capita
   create_city_income_chart(city_summary, cs)
 }
 
