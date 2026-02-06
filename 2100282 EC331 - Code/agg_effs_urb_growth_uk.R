@@ -9,7 +9,7 @@ rm(list = ls())
 # PACKAGES ####
 #_______________________________________________________________________________
 
-packages <- c("readr", "tidyverse", "httr", "jsonlite", "readxl", "ggrepel", "stargazer", "here")
+packages <- c("readr", "tidyverse", "httr", "jsonlite", "readxl", "ggrepel", "stargazer")
 
 install_if_missing <- function(pkg) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
@@ -56,7 +56,7 @@ PERM_DATA_END_YEAR <- 2021
 
 PERCENTILE_FOR_PERM_RATE <- 0.98
 
-AUSTIN_DATA_FILE <- here("Data", "Issued_Construction_Permits_20250927.csv")
+AUSTIN_DATA_FILE <- file.path("Data", "Issued_Construction_Permits_20250927.csv")
 AUSTIN_2001_POP <- 669693
 
 PERM_RATE_CHANGE_FACTORS <- c(0.05, 0.1, 0.25, 0.3, 0.5)
@@ -134,7 +134,7 @@ calculate_austin_perm_rate <- function(filepath = AUSTIN_DATA_FILE) {
 if (SKIP_DATA_CONSTRUCTION) {
   
   message("Loading pre-existing data, skipping construction...")
-  city_data <- read_csv(here("Data", "agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints.csv"))
+  city_data <- read_csv(file.path("Data", "agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints.csv"))
   
   urb_01_pop <- sum(city_data$bua_01_pop)
   urb_21_pop <- sum(city_data$bua_21_pop)
@@ -146,15 +146,15 @@ if (SKIP_DATA_CONSTRUCTION) {
   message("Running full data construction pipeline...")
   
   # Import raw data
-  lsoa_land_use_2022_raw <- read_csv(here("Data", "lsoa_land_use_2022.csv"))
-  lsoa_pop_2001_raw <- read_csv(here("Data", "lsoa_pop_2001.csv"))
-  lsoa_pop_2011_raw <- read_csv(here("Data", "lsoa_pop_2011.csv"))
-  lsoa_pop_2021_raw <- read_csv(here("Data", "lsoa_pop_2021.csv"))
-  lsoa_lookup_2001_to_2011_raw <- read_csv(here("Data", "LSOA_(2001)_to_LSOA_(2011)_to_LAD_(2011)_Lookup_in_England_and_Wales.csv"))
-  lsoa_lookup_2011_to_2021_raw <- read_csv(here("Data", "LSOA_(2011)_to_LSOA_(2021)_to_LAD_(2022)_Best_Fit_Lookup_for_EW_(V2).csv"))
-  lsoa_bua_lookup_2021_raw <- read_csv(here("Data", "LSOA_(2021)_to_Built_Up_Area_to_Local_Authority_District_to_Region_(December_2022)_Lookup_in_England_and_Wales_v2.csv"))
+  lsoa_land_use_2022_raw <- read_csv(file.path("Data", "lsoa_land_use_2022.csv"))
+  lsoa_pop_2001_raw <- read_csv(file.path("Data", "lsoa_pop_2001.csv"))
+  lsoa_pop_2011_raw <- read_csv(file.path("Data", "lsoa_pop_2011.csv"))
+  lsoa_pop_2021_raw <- read_csv(file.path("Data", "lsoa_pop_2021.csv"))
+  lsoa_lookup_2001_to_2011_raw <- read_csv(file.path("Data", "LSOA_(2001)_to_LSOA_(2011)_to_LAD_(2011)_Lookup_in_England_and_Wales.csv"))
+  lsoa_lookup_2011_to_2021_raw <- read_csv(file.path("Data", "LSOA_(2011)_to_LSOA_(2021)_to_LAD_(2022)_Best_Fit_Lookup_for_EW_(V2).csv"))
+  lsoa_bua_lookup_2021_raw <- read_csv(file.path("Data", "LSOA_(2021)_to_Built_Up_Area_to_Local_Authority_District_to_Region_(December_2022)_Lookup_in_England_and_Wales_v2.csv"))
   
-  perm_rates_raw <- read_csv(here("Data", "PS2_data_-_open_data_table__202409_.csv"), skip = 2) %>%
+  perm_rates_raw <- read_csv(file.path("Data", "PS2_data_-_open_data_table__202409_.csv"), skip = 2) %>%
     select(2:4, 34, 112) %>%
     slice(PERM_DATA_START_ROW:n())
   
@@ -244,7 +244,7 @@ if (SKIP_DATA_CONSTRUCTION) {
     select(-lsoa_2021_name)
   
   # Fix missing LAD codes
-  lads_to_add <- read_csv(here("Data", "lads_to_add_backup.csv"))
+  lads_to_add <- read_csv(file.path("Data", "lads_to_add_backup.csv"))
   
   lsoa_with_lad <- lsoa_with_land_use %>%
     left_join(lads_to_add, by = "LSOA21CD") %>%
@@ -326,7 +326,7 @@ if (SKIP_DATA_CONSTRUCTION) {
     )
   
   # LSOA to BUA mapping
-  buas_to_add <- read_csv(here("Data", "buas_to_add_backup.csv"))
+  buas_to_add <- read_csv(file.path("Data", "buas_to_add_backup.csv"))
   
   lsoa_bua_lookup <- lsoa_bua_lookup_2021_raw %>%
     select(-ends_with("W"), -ObjectId) %>%
@@ -410,7 +410,7 @@ if (SKIP_DATA_CONSTRUCTION) {
     rename(geographic_constraint = all_of(GEOGRAPHIC_CONSTRAINT_VAR)) %>%
     arrange(desc(bua_21_pop))
   
-  write_csv(city_data, here("Data", "agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints.csv"))
+  write_csv(city_data, file.path("Data", "agg_pop_01_11_21_ovr_city_threshold_rounded_rm_geog_constraints.csv"))
   
   urb_01_pop <- sum(city_data$bua_01_pop)
   urb_21_pop <- sum(city_data$bua_21_pop)
@@ -778,9 +778,9 @@ message(sprintf("  Aggregate observations: %d", nrow(agg_summary)))
 message(sprintf("  City income observations: %d", nrow(city_income_summary)))
 message(sprintf("  City consumption observations: %d", nrow(city_cons_summary)))
 
-write_csv(agg_summary, here("Outputs", "central_sweep_summary.csv"))
-write_csv(city_income_summary, here("Outputs", "city_income_results.csv"))
-write_csv(city_cons_summary, here("Outputs", "city_consumption_results.csv"))
+write_csv(agg_summary, file.path("Outputs", "central_sweep_summary.csv"))
+write_csv(city_income_summary, file.path("Outputs", "city_income_results.csv"))
+write_csv(city_cons_summary, file.path("Outputs", "city_consumption_results.csv"))
 
 
 #===============================================================================
@@ -789,7 +789,14 @@ write_csv(city_cons_summary, here("Outputs", "city_consumption_results.csv"))
 
 message("\n=== GENERATING LINE CHARTS ===\n")
 
-line_color <- "#1f77b4"
+custom_palette <- c(
+  '#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231',
+  '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4',
+  '#469990', '#dcbeff', '#9A6324', '#fffac8', '#800000',
+  '#aaffc3', '#808000', '#ffd8b1', '#000075', '#a9a9a9'
+)
+
+line_color <- custom_palette[1]
 
 city_set_labels <- c(
   london_only = "London only",
@@ -835,7 +842,7 @@ create_line_chart <- function(data, city_set_name, y_var, ylabel, title_metric, 
     )
   
   ggsave(
-    here("Outputs", sprintf("%s_%s.png", filename_suffix, city_set_name)),
+    file.path("Outputs", sprintf("%s_%s.png", filename_suffix, city_set_name)),
     p, width = 24, height = 14, units = "cm", dpi = 320
   )
   p
@@ -858,11 +865,7 @@ create_city_line_chart <- function(city_data, city_set_name, y_var, ylabel,
     mutate(BUA22NM = factor(BUA22NM, levels = city_order))
   
   n_cities <- length(city_order)
-  colors <- if (n_cities <= 8) {
-    RColorBrewer::brewer.pal(max(3, n_cities), "Set2")[1:n_cities]
-  } else {
-    scales::hue_pal()(n_cities)
-  }
+  colors <- custom_palette[1:n_cities]
   names(colors) <- city_order
   
   p <- ggplot(plot_data, aes(x = target_rate, y = .data[[y_var]], color = BUA22NM)) +
@@ -893,7 +896,7 @@ create_city_line_chart <- function(city_data, city_set_name, y_var, ylabel,
     )
   
   ggsave(
-    here("Outputs", sprintf("%s_%s.png", filename_suffix, city_set_name)),
+    file.path("Outputs", sprintf("%s_%s.png", filename_suffix, city_set_name)),
     p, width = 26, height = 14, units = "cm", dpi = 320
   )
   p
@@ -933,7 +936,7 @@ for (cs in names(cities_sets)) {
 
 message("\n=== ALL CHARTS GENERATED ===\n")
 
-write_csv(reference_rates, here("Outputs", "reference_rates.csv"))
+write_csv(reference_rates, file.path("Outputs", "reference_rates.csv"))
 
 message("Results saved to Outputs/")
 message("=== ANALYSIS COMPLETE ===")
