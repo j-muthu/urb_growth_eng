@@ -105,7 +105,7 @@ calculate_austin_perm_rate <- function(filepath = AUSTIN_DATA_FILE) {
   
   delete_conditions <- c("clubhouse", "new garage", "new parking garage", "maintenance", "kiosk", "new 2 level parking garage")
   
-  total_permits <- read_csv(filepath, show_col_types = FALSE) %>%
+  total_permits <- readr::read_csv(filepath, show_col_types = FALSE) %>%
     select(`Calendar Year Issued`, `Housing Units`, `Status Current`, Description, `Number Of Floors`) %>%
     filter(
       `Calendar Year Issued` >= 2001,
@@ -710,23 +710,28 @@ message(sprintf("\nRate sweep: %.4f to %.4f by %.4f (%d values)",
 #-------------------------------------------------------------------------------
 # Run sweep for each city set (central params only)
 #-------------------------------------------------------------------------------
-run_central_sweep <- function(city_set_name, cities_in_cf, rate_sequence, pop_totals) {
-  
+run_central_sweep <- function(city_set_name, cities_in_cf,
+                              rate_sequence, pop_totals) {
+
   message(sprintf("\n=== Running sweep for: %s ===", city_set_name))
-  
-  cf_prep <- prepare_counterfactual_data(city_data, cities_in_cf, PARAMS_CENTRAL, pop_totals)
-  
+
+  cf_prep <- prepare_counterfactual_data(city_data, cities_in_cf,
+                                         PARAMS_CENTRAL, pop_totals)
+
   agg_results <- vector("list", length(rate_sequence))
   city_income_results <- vector("list", length(rate_sequence))
   city_cons_results <- vector("list", length(rate_sequence))
-  
+
   pb <- txtProgressBar(min = 0, max = length(rate_sequence), style = 3)
-  
+
   for (r in seq_along(rate_sequence)) {
     target_rate <- rate_sequence[r]
-    
+
     perm_rate_cf <- cf_prep$data %>%
-      mutate(rate = if_else(in_counterfact == 1, pmax(bua_perm_rate_01_21, target_rate), bua_perm_rate_01_21)) %>%
+      mutate(rate = if_else(in_counterfact == 1,
+        pmax(bua_perm_rate_01_21, target_rate),
+        bua_perm_rate_01_21)
+      ) %>%
       pull(rate)
     
     result <- run_single_counterfactual(cf_prep, perm_rate_cf)
@@ -758,8 +763,10 @@ run_central_sweep <- function(city_set_name, cities_in_cf, rate_sequence, pop_to
   
   list(
     agg = bind_rows(agg_results) %>% mutate(city_set = city_set_name),
-    city_income = bind_rows(city_income_results) %>% mutate(city_set = city_set_name),
-    city_cons = bind_rows(city_cons_results) %>% mutate(city_set = city_set_name)
+    city_income = bind_rows(city_income_results) %>%
+      mutate(city_set = city_set_name),
+    city_cons = bind_rows(city_cons_results) %>%
+      mutate(city_set = city_set_name)
   )
 }
 
