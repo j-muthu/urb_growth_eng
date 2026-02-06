@@ -937,8 +937,9 @@ identify_extreme_params <- function(cities_in_cf, param_grid, test_rate, pop_tot
     tibble(
       param_idx = p,
       pct_chg_newcomer_cons = result$welfare$pct_chg_c_rur,
-      pct_chg_national_gdp = result$welfare$pct_chg_y_tot,
-      pct_chg_city_income = pct_chg_y_cities
+      pct_chg_incumbent_cons = result$welfare$pct_chg_c_tot,
+      pct_chg_national_income_pc = result$welfare$pct_chg_y_tot,
+      pct_chg_city_income_pc = pct_chg_y_cities
     )
   })
   
@@ -946,15 +947,17 @@ identify_extreme_params <- function(cities_in_cf, param_grid, test_rate, pop_tot
   list(
     newcomer_cons_max_idx = results$param_idx[which.max(results$pct_chg_newcomer_cons)],
     newcomer_cons_min_idx = results$param_idx[which.min(results$pct_chg_newcomer_cons)],
-    national_gdp_max_idx = results$param_idx[which.max(results$pct_chg_national_gdp)],
-    national_gdp_min_idx = results$param_idx[which.min(results$pct_chg_national_gdp)],
-    city_income_max_idx = results$param_idx[which.max(results$pct_chg_city_income)],
-    city_income_min_idx = results$param_idx[which.min(results$pct_chg_city_income)]
+    incumbent_cons_max_idx = results$param_idx[which.max(results$pct_chg_incumbent_cons)],
+    incumbent_cons_min_idx = results$param_idx[which.min(results$pct_chg_incumbent_cons)],
+    national_income_pc_max_idx = results$param_idx[which.max(results$pct_chg_national_income_pc)],
+    national_income_pc_min_idx = results$param_idx[which.min(results$pct_chg_national_income_pc)],
+    city_income_pc_max_idx = results$param_idx[which.max(results$pct_chg_city_income_pc)],
+    city_income_pc_min_idx = results$param_idx[which.min(results$pct_chg_city_income_pc)]
   )
 }
 
 #-------------------------------------------------------------------------------
-# STEP 2: Run sweep - now capturing city-level data
+# STEP 2: Run sweep - capturing city-level income AND consumption data
 #-------------------------------------------------------------------------------
 run_optimized_sweep <- function(city_set_name, cities_in_cf, param_grid, rate_sequence, 
                                 pop_totals, extreme_indices) {
@@ -973,23 +976,28 @@ run_optimized_sweep <- function(city_set_name, cities_in_cf, param_grid, rate_se
     central_idx,
     extreme_indices$newcomer_cons_max_idx,
     extreme_indices$newcomer_cons_min_idx,
-    extreme_indices$national_gdp_max_idx,
-    extreme_indices$national_gdp_min_idx,
-    extreme_indices$city_income_max_idx,
-    extreme_indices$city_income_min_idx
+    extreme_indices$incumbent_cons_max_idx,
+    extreme_indices$incumbent_cons_min_idx,
+    extreme_indices$national_income_pc_max_idx,
+    extreme_indices$national_income_pc_min_idx,
+    extreme_indices$city_income_pc_max_idx,
+    extreme_indices$city_income_pc_min_idx
   ))
+  
+  # Which param indices we need city-level data for
+  city_level_indices <- c(central_idx, 
+                          extreme_indices$city_income_pc_max_idx, 
+                          extreme_indices$city_income_pc_min_idx)
   
   message(sprintf("  Running %d unique parameter sets × %d rates = %d evaluations",
                   length(unique_indices), length(rate_sequence), 
                   length(unique_indices) * length(rate_sequence)))
   
-  # Aggregate results
   agg_results <- vector("list", length(unique_indices) * length(rate_sequence))
-  # City-level results (central params only)
-  city_results <- vector("list", length(rate_sequence))
+  city_income_results <- list()
+  city_cons_results <- list()  # NEW: for incumbent consumption
   
   idx <- 0
-  city_idx <- 0
   
   pb <- txtProgressBar(min = 0, max = length(unique_indices) * length(rate_sequence), style = 3)
   
@@ -1024,15 +1032,31 @@ run_optimized_sweep <- function(city_set_name, cities_in_cf, param_grid, rate_se
         is_central = (p == central_idx),
         target_rate = target_rate,
         pct_chg_newcomer_cons = result$welfare$pct_chg_c_rur,
-        pct_chg_national_gdp = result$welfare$pct_chg_y_tot,
-        pct_chg_city_income = pct_chg_y_cities
+        pct_chg_incumbent_cons = result$welfare$pct_chg_c_tot,
+        pct_chg_national_income_pc = result$welfare$pct_chg_y_tot,
+        pct_chg_city_income_pc = pct_chg_y_cities
       )
       
-      # Store city-level data for central params only
-      if (p == central_idx) {
-        city_idx <- city_idx + 1
-        city_results[[city_idx]] <- treated %>%
+      # Store city-level income data for central and extremes
+      if (p %in% city_level_indices) {
+        param_type <- case_when(
+          p == central_idx ~ "central",
+          p == extreme_indices$city_income_pc_max_idx ~ "max",
+          p == extreme_indices$city_income_pc_min_idx ~ "min"
+        )
+        
+        city_income_results[[length(city_income_results) + 1]] <- treated %>%
           select(BUA22NM, bua_21_pop, pct_chg_y) %>%
+          mutate(
+            target_rate = target_rate,
+            param_type = param_type
+          )
+      }
+      
+      # Store city-level consumption data for central params only (no uncertainty bands)
+      if (p == central_idx) {
+        city_cons_results[[length(city_cons_results) + 1]] <- treated %>%
+          select(BUA22NM, bua_21_pop, pct_chg_c) %>%
           mutate(target_rate = target_rate)
       }
       
@@ -1042,14 +1066,18 @@ run_optimized_sweep <- function(city_set_name, cities_in_cf, param_grid, rate_se
   close(pb)
   
   all_agg_results <- bind_rows(agg_results)
-  all_city_results <- bind_rows(city_results) %>% mutate(city_set = city_set_name)
+  all_city_income_results <- bind_rows(city_income_results) %>% mutate(city_set = city_set_name)
+  all_city_cons_results <- bind_rows(city_cons_results) %>% mutate(city_set = city_set_name)
   
-  # Reshape aggregate into fan format (same as before)
+  # Reshape aggregate into fan format
   fan_data <- tibble(target_rate = rate_sequence) %>%
     left_join(
       all_agg_results %>% filter(is_central) %>% 
-        select(target_rate, nc_central = pct_chg_newcomer_cons, 
-               gdp_central = pct_chg_national_gdp, ci_central = pct_chg_city_income),
+        select(target_rate, 
+               nc_central = pct_chg_newcomer_cons,
+               ic_central = pct_chg_incumbent_cons,
+               ni_central = pct_chg_national_income_pc, 
+               ci_central = pct_chg_city_income_pc),
       by = "target_rate"
     ) %>%
     left_join(
@@ -1063,42 +1091,43 @@ run_optimized_sweep <- function(city_set_name, cities_in_cf, param_grid, rate_se
       by = "target_rate"
     ) %>%
     left_join(
-      all_agg_results %>% filter(param_idx == extreme_indices$national_gdp_max_idx) %>%
-        select(target_rate, gdp_max = pct_chg_national_gdp),
+      all_agg_results %>% filter(param_idx == extreme_indices$national_income_pc_max_idx) %>%
+        select(target_rate, ni_max = pct_chg_national_income_pc),
       by = "target_rate"
     ) %>%
     left_join(
-      all_agg_results %>% filter(param_idx == extreme_indices$national_gdp_min_idx) %>%
-        select(target_rate, gdp_min = pct_chg_national_gdp),
-      by = "target_rate"
-    ) %>%
-    left_join(
-      all_agg_results %>% filter(param_idx == extreme_indices$city_income_max_idx) %>%
-        select(target_rate, ci_max = pct_chg_city_income),
-      by = "target_rate"
-    ) %>%
-    left_join(
-      all_agg_results %>% filter(param_idx == extreme_indices$city_income_min_idx) %>%
-        select(target_rate, ci_min = pct_chg_city_income),
+      all_agg_results %>% filter(param_idx == extreme_indices$national_income_pc_min_idx) %>%
+        select(target_rate, ni_min = pct_chg_national_income_pc),
       by = "target_rate"
     ) %>%
     mutate(city_set = city_set_name)
   
+  # Reshape city income data into wide format with min/max/central columns
+  city_income_fan_data <- all_city_income_results %>%
+    pivot_wider(
+      id_cols = c(city_set, BUA22NM, bua_21_pop, target_rate),
+      names_from = param_type,
+      values_from = pct_chg_y,
+      names_prefix = "pct_chg_y_"
+    )
+  
   list(
     fan_data = fan_data,
-    city_data = all_city_results,  # NEW: city-level trajectories
+    city_income_data = city_income_fan_data,
+    city_cons_data = all_city_cons_results,  # NEW: city-level consumption (central only)
     extreme_indices = extreme_indices,
     central_idx = central_idx
   )
 }
 
 #-------------------------------------------------------------------------------
-# Run for all city sets (modified to capture city data)
+# Run for all city sets
 #-------------------------------------------------------------------------------
 test_rate <- mean(c(rate_start, rate_end))
 
 all_fan_data <- list()
-all_city_data <- list()  # NEW
+all_city_income_data <- list()
+all_city_cons_data <- list()  # NEW
 all_extreme_params <- list()
 
 for (cs in names(cities_sets)) {
@@ -1120,26 +1149,30 @@ for (cs in names(cities_sets)) {
                   param_grid$sigma[extreme_idx$newcomer_cons_min_idx],
                   param_grid$beta[extreme_idx$newcomer_cons_min_idx],
                   param_grid$lambda[extreme_idx$newcomer_cons_min_idx]))
-  message("GDP max: ", paste(param_grid[extreme_idx$national_gdp_max_idx, ], collapse=", "))
-  message("GDP min: ", paste(param_grid[extreme_idx$national_gdp_min_idx, ], collapse=", "))
-  message("City income max: ", paste(param_grid[extreme_idx$city_income_max_idx, ], collapse=", "))
-  message("City income min: ", paste(param_grid[extreme_idx$city_income_min_idx, ], collapse=", "))
+  message("National income pc max: ", paste(param_grid[extreme_idx$national_income_pc_max_idx, ], collapse=", "))
+  message("National income pc min: ", paste(param_grid[extreme_idx$national_income_pc_min_idx, ], collapse=", "))
+  message("City income pc max: ", paste(param_grid[extreme_idx$city_income_pc_max_idx, ], collapse=", "))
+  message("City income pc min: ", paste(param_grid[extreme_idx$city_income_pc_min_idx, ], collapse=", "))
   
   sweep_result <- run_optimized_sweep(cs, cities_sets[[cs]], param_grid, rate_sequence, 
                                       pop_totals, extreme_idx)
   all_fan_data[[cs]] <- sweep_result$fan_data
-  all_city_data[[cs]] <- sweep_result$city_data  # NEW
+  all_city_income_data[[cs]] <- sweep_result$city_income_data
+  all_city_cons_data[[cs]] <- sweep_result$city_cons_data  # NEW
 }
 
 fan_summary <- bind_rows(all_fan_data)
-city_summary <- bind_rows(all_city_data)  # NEW
+city_income_summary <- bind_rows(all_city_income_data)
+city_cons_summary <- bind_rows(all_city_cons_data)  # NEW
 
 message("\nSweep complete.")
 message(sprintf("  Aggregate observations: %d", nrow(fan_summary)))
-message(sprintf("  City-level observations: %d", nrow(city_summary)))
+message(sprintf("  City income observations: %d", nrow(city_income_summary)))
+message(sprintf("  City consumption observations: %d", nrow(city_cons_summary)))
 
 write_csv(fan_summary, "Outputs/fan_chart_summary.csv")
-write_csv(city_summary, "Outputs/city_level_results.csv")  # NEW
+write_csv(city_income_summary, "Outputs/city_income_results.csv")
+write_csv(city_cons_summary, "Outputs/city_consumption_results.csv")  # NEW
 
 #===============================================================================
 # PLOTTING
@@ -1158,7 +1191,7 @@ city_set_labels <- c(
 )
 
 #-------------------------------------------------------------------------------
-# Fan chart function
+# Fan chart function (for newcomer cons and national income pc)
 #-------------------------------------------------------------------------------
 create_fan_chart <- function(data, city_set_name, y_min, y_max, y_central, 
                              ylabel, title_metric, filename_suffix) {
@@ -1201,7 +1234,7 @@ create_fan_chart <- function(data, city_set_name, y_min, y_max, y_central,
 }
 
 #-------------------------------------------------------------------------------
-# City income per capita chart with individual city lines
+# City income per capita chart with shaded bands
 #-------------------------------------------------------------------------------
 create_city_income_chart <- function(city_data, city_set_name) {
   
@@ -1217,24 +1250,27 @@ create_city_income_chart <- function(city_data, city_set_name) {
   
   n_cities <- length(city_order)
   if (n_cities <= 8) {
-    colors <- RColorBrewer::brewer.pal(max(3, n_cities), "Set2")
+    colors <- RColorBrewer::brewer.pal(max(3, n_cities), "Set2")[1:n_cities]
   } else {
     colors <- scales::hue_pal()(n_cities)
   }
+  names(colors) <- city_order
   
-  p <- ggplot(plot_data, aes(x = target_rate, y = pct_chg_y, color = BUA22NM)) +
-    geom_line(linewidth = 0.8) +
+  p <- ggplot(plot_data, aes(x = target_rate)) +
+    geom_ribbon(aes(ymin = pct_chg_y_min, ymax = pct_chg_y_max, fill = BUA22NM), 
+                alpha = 0.4) +
+    geom_line(aes(y = pct_chg_y_central, color = BUA22NM), linewidth = 0.8) +
     geom_vline(data = reference_rates, aes(xintercept = rate), 
                linetype = "dashed", color = "gray40", linewidth = 0.5) +
     geom_text(data = reference_rates, aes(x = rate, y = Inf, label = label),
-              angle = 90, hjust = 1.1, vjust = -0.3, size = 2.5, color = "gray30",
-              inherit.aes = FALSE) +
+              angle = 90, hjust = 1.1, vjust = -0.3, size = 2.5, color = "gray30") +
     scale_x_continuous(
       name = "Counterfactual permitting rate",
       labels = scales::number_format(accuracy = 0.01)
     ) +
     scale_y_continuous(name = "% change in income per capita") +
     scale_color_manual(values = colors, name = "City") +
+    scale_fill_manual(values = colors, name = "City") +
     theme_minimal() +
     theme(
       panel.grid.minor = element_blank(),
@@ -1244,7 +1280,7 @@ create_city_income_chart <- function(city_data, city_set_name) {
     ) +
     labs(
       title = sprintf("Change in city income per capita: %s", city_set_labels[city_set_name]),
-      subtitle = "Each line shows per capita income change for one city (central parameter estimates)",
+      subtitle = "Shaded bands: parameter uncertainty | Solid lines: central estimates",
       caption = sprintf("Central: γ=%.2f, θ=%.2f, σ=%.3f, β=%.2f, λ=%.2f",
                         central_params$gamma, central_params$theta, 
                         central_params$sigma, central_params$beta, central_params$lambda)
@@ -1259,25 +1295,89 @@ create_city_income_chart <- function(city_data, city_set_name) {
 }
 
 #-------------------------------------------------------------------------------
+# NEW: Incumbent consumption chart - individual city lines, no uncertainty bands
+#-------------------------------------------------------------------------------
+create_incumbent_cons_chart <- function(city_data, city_set_name) {
+  
+  plot_data <- city_data %>% filter(city_set == city_set_name)
+  
+  # Order cities by population for legend
+  city_order <- plot_data %>%
+    distinct(BUA22NM, bua_21_pop) %>%
+    arrange(desc(bua_21_pop)) %>%
+    pull(BUA22NM)
+  
+  plot_data <- plot_data %>%
+    mutate(BUA22NM = factor(BUA22NM, levels = city_order))
+  
+  n_cities <- length(city_order)
+  if (n_cities <= 8) {
+    colors <- RColorBrewer::brewer.pal(max(3, n_cities), "Set2")[1:n_cities]
+  } else {
+    colors <- scales::hue_pal()(n_cities)
+  }
+  names(colors) <- city_order
+  
+  p <- ggplot(plot_data, aes(x = target_rate, y = pct_chg_c, color = BUA22NM)) +
+    geom_line(linewidth = 0.8) +
+    geom_hline(yintercept = 0, linetype = "solid", color = "gray60", linewidth = 0.3) +
+    geom_vline(data = reference_rates, aes(xintercept = rate), 
+               linetype = "dashed", color = "gray40", linewidth = 0.5) +
+    geom_text(data = reference_rates, aes(x = rate, y = Inf, label = label),
+              angle = 90, hjust = 1.1, vjust = -0.3, size = 2.5, color = "gray30",
+              inherit.aes = FALSE) +
+    scale_x_continuous(
+      name = "Counterfactual permitting rate",
+      labels = scales::number_format(accuracy = 0.01)
+    ) +
+    scale_y_continuous(name = "% change in consumption") +
+    scale_color_manual(values = colors, name = "City") +
+    theme_minimal() +
+    theme(
+      panel.grid.minor = element_blank(),
+      plot.title = element_text(size = 12, face = "bold"),
+      plot.subtitle = element_text(size = 9, color = "gray40"),
+      legend.position = "right"
+    ) +
+    labs(
+      title = sprintf("Change in incumbent consumption: %s", city_set_labels[city_set_name]),
+      subtitle = "Each line shows consumption change for incumbents in one city (central estimates)",
+      caption = sprintf("Central: γ=%.2f, θ=%.2f, σ=%.3f, β=%.2f, λ=%.2f",
+                        central_params$gamma, central_params$theta, 
+                        central_params$sigma, central_params$beta, central_params$lambda)
+    )
+  
+  ggsave(
+    sprintf("Outputs/city_incumbent_cons_%s.png", city_set_name),
+    p, width = 26, height = 14, units = "cm", dpi = 320
+  )
+  
+  p
+}
+
+#-------------------------------------------------------------------------------
 # Generate all charts
 #-------------------------------------------------------------------------------
 for (cs in names(cities_sets)) {
   message(sprintf("Creating charts for: %s", cs))
   
-  # Newcomer consumption (= rural consumption = marginal worker welfare)
+  # Newcomer consumption - fan chart
   create_fan_chart(fan_summary, cs, "nc_min", "nc_max", "nc_central",
                    "% change in consumption",
                    "Change in newcomer consumption",
                    "newcomer_cons")
   
-  # National average income per capita (= GDP per capita since pop fixed)
-  create_fan_chart(fan_summary, cs, "gdp_min", "gdp_max", "gdp_central",
+  # National average income per capita - fan chart
+  create_fan_chart(fan_summary, cs, "ni_min", "ni_max", "ni_central",
                    "% change in income per capita",
                    "Change in national income per capita",
                    "national_income_pc")
   
-  # City-level income per capita
-  create_city_income_chart(city_summary, cs)
+  # City-level income per capita - multi-line with bands
+  create_city_income_chart(city_income_summary, cs)
+  
+  # Incumbent consumption - multi-line, no bands
+  create_incumbent_cons_chart(city_cons_summary, cs)
 }
 
 message("\n=== ALL CHARTS GENERATED ===\n")
