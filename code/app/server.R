@@ -52,6 +52,31 @@ function(input, output, session) {
       lambda = input$lambda
     )
 
+    # Check if params match central estimates (pre-computed)
+    is_central <- all(mapply(
+      function(a, b) isTRUE(all.equal(a, b)),
+      params, PARAMS_CENTRAL
+    ))
+
+    if (is_central) {
+      if (input$city_set == "all") {
+        sweep_results(default_sweep_results)
+      } else {
+        cs <- input$city_set
+        sweep_results(list(
+          agg = default_sweep_results$agg %>%
+            filter(city_set == cs),
+          city_income = default_sweep_results$city_income %>%
+            filter(city_set == cs),
+          city_cons = default_sweep_results$city_cons %>%
+            filter(city_set == cs),
+          params = params,
+          city_set = cs
+        ))
+      }
+      return()
+    }
+
     sets_to_run <- if (input$city_set == "all") {
       names(cities_sets)
     } else {
