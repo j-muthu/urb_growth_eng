@@ -1,3 +1,6 @@
 code/Outputs/*
-code/.R*
+.claude
 todo.txt
+.R*
+**/.R*
+**/**/.R*
