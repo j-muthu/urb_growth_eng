@@ -114,3 +114,21 @@ rate_start <- floor(pct_75 * 100) / 100
 rate_end <- 0.13
 rate_increment <- 0.001
 rate_sequence <- seq(rate_start, rate_end, by = rate_increment)
+
+#_______________________________________________________________________________
+# PRE-COMPUTE DEFAULT RESULTS (central estimates, all city sets) ####
+#_______________________________________________________________________________
+
+default_sweep_results <- {
+  all_results <- lapply(names(cities_sets), function(cs) {
+    run_sweep(cs, cities_sets[[cs]], rate_sequence, pop_totals, PARAMS_CENTRAL, city_data)
+  })
+  names(all_results) <- names(cities_sets)
+  list(
+    agg = bind_rows(lapply(all_results, `[[`, "agg")),
+    city_income = bind_rows(lapply(all_results, `[[`, "city_income")),
+    city_cons = bind_rows(lapply(all_results, `[[`, "city_cons")),
+    params = PARAMS_CENTRAL,
+    city_set = "all"
+  )
+}

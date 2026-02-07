@@ -41,7 +41,9 @@ function(input, output, session) {
   # RUN SWEEP ####
   #_____________________________________________________________________________
 
-  sweep_results <- eventReactive(input$run_sweep, {
+  sweep_results <- reactiveVal(default_sweep_results)
+
+  observeEvent(input$run_sweep, {
     params <- list(
       gamma  = input$gamma,
       theta  = input$theta,
@@ -50,12 +52,18 @@ function(input, output, session) {
       lambda = input$lambda
     )
 
-    sets_to_run <- if (input$city_set == "all") names(cities_sets) else input$city_set
+    sets_to_run <- if (input$city_set == "all") {
+      names(cities_sets)
+    } else {
+      input$city_set
+    }
     n_sets <- length(sets_to_run)
     n_total <- n_sets * length(rate_sequence)
     completed <- 0
 
-    withProgress(message = "Running counterfactual sweep...", value = 0, {
+    withProgress(
+      message = "Running counterfactual sweep...",
+      value = 0, {
       all_results <- map(sets_to_run, function(cs) {
         result <- run_sweep(
           city_set_name = cs,
@@ -66,8 +74,10 @@ function(input, output, session) {
           city_data = city_data,
           progress_callback = function(r, total) {
             completed <<- completed + 1
-            incProgress(1 / n_total,
-                        detail = sprintf("%s (%d/%d)", cs, r, total))
+            incProgress(
+              1 / n_total,
+              detail = sprintf("%s (%d/%d)", cs, r, total)
+            )
           }
         )
         result
@@ -75,13 +85,13 @@ function(input, output, session) {
       names(all_results) <- sets_to_run
     })
 
-    list(
+    sweep_results(list(
       agg = bind_rows(map(all_results, "agg")),
       city_income = bind_rows(map(all_results, "city_income")),
       city_cons = bind_rows(map(all_results, "city_cons")),
       params = params,
       city_set = input$city_set
-    )
+    ))
   })
 
   #_____________________________________________________________________________
@@ -131,30 +141,113 @@ function(input, output, session) {
   # CITY-LEVEL CHARTS ####
   #_____________________________________________________________________________
 
-  render_city_chart <- function(city_data_col, y_var, ylabel, title_metric) {
+  make_city_plotly <- function(city_data_col, city_set_name,
+                               y_var, ylabel,
+                               title_metric, params) {
     res <- sweep_results()
-    cs <- res$city_set
-    city_set_to_use <- if (cs == "all") "top_6" else cs
-
     p <- create_city_line_chart(
-      res[[city_data_col]], city_set_to_use, y_var, ylabel,
-      title_metric, reference_rates, res$params
+      res[[city_data_col]], city_set_name,
+      y_var, ylabel, title_metric,
+      reference_rates, params
     )
-
     ggplotly(p, tooltip = "text") %>%
       plotly::layout(hovermode = "x unified") %>%
       add_ref_annotations(reference_rates)
   }
 
-  output$plot_city_income <- renderPlotly({
-    render_city_chart("city_income", "pct_chg_y",
-                      "% change in income per capita",
-                      "Change in city income per capita")
+  # --- Dynamic UI: sub-tabs when "all", single chart otherwise ---
+
+  output$city_income_ui <- renderUI({
+    res <- sweep_results()
+    if (res$city_set == "all") {
+      do.call(tabsetPanel, lapply(
+        names(cities_sets), function(cs) {
+          tabPanel(
+            city_set_labels[[cs]],
+            br(),
+            plotlyOutput(
+              paste0("city_income_", cs),
+              height = "550px"
+            )
+          )
+        }
+      ))
+    } else {
+      plotlyOutput(
+        "plot_city_income_single", height = "550px"
+      )
+    }
   })
 
-  output$plot_city_cons <- renderPlotly({
-    render_city_chart("city_cons", "pct_chg_c",
-                      "% change in consumption",
-                      "Change in incumbent consumption by city")
+  output$city_cons_ui <- renderUI({
+    res <- sweep_results()
+    if (res$city_set == "all") {
+      do.call(tabsetPanel, lapply(
+        names(cities_sets), function(cs) {
+          tabPanel(
+            city_set_labels[[cs]],
+            br(),
+            plotlyOutput(
+              paste0("city_cons_", cs),
+              height = "550px"
+            )
+          )
+        }
+      ))
+    } else {
+      plotlyOutput(
+        "plot_city_cons_single", height = "550px"
+      )
+    }
+  })
+
+  # --- Eagerly register renderPlotly for each city set ---
+
+  lapply(names(cities_sets), function(cs) {
+    output[[paste0("city_income_", cs)]] <- renderPlotly({
+      res <- sweep_results()
+      req(res$city_set == "all")
+      make_city_plotly(
+        "city_income", cs, "pct_chg_y",
+        "% change in income per capita",
+        "Change in city income per capita",
+        res$params
+      )
+    })
+
+    output[[paste0("city_cons_", cs)]] <- renderPlotly({
+      res <- sweep_results()
+      req(res$city_set == "all")
+      make_city_plotly(
+        "city_cons", cs, "pct_chg_c",
+        "% change in consumption",
+        "Change in incumbent consumption by city",
+        res$params
+      )
+    })
+  })
+
+  # --- Single city set outputs ---
+
+  output$plot_city_income_single <- renderPlotly({
+    res <- sweep_results()
+    req(res$city_set != "all")
+    make_city_plotly(
+      "city_income", res$city_set, "pct_chg_y",
+      "% change in income per capita",
+      "Change in city income per capita",
+      res$params
+    )
+  })
+
+  output$plot_city_cons_single <- renderPlotly({
+    res <- sweep_results()
+    req(res$city_set != "all")
+    make_city_plotly(
+      "city_cons", res$city_set, "pct_chg_c",
+      "% change in consumption",
+      "Change in incumbent consumption by city",
+      res$params
+    )
   })
 }

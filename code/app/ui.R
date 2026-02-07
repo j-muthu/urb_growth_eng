@@ -67,11 +67,11 @@ fluidPage(
 
         tabPanel("City Income",
                  br(),
-                 plotlyOutput("plot_city_income", height = "550px")),
+                 uiOutput("city_income_ui")),
 
         tabPanel("City Consumption",
                  br(),
-                 plotlyOutput("plot_city_cons", height = "550px"))
+                 uiOutput("city_cons_ui"))
       )
     )
   )
