@@ -9,7 +9,7 @@ rm(list = ls())
 # PACKAGES ####
 #_______________________________________________________________________________
 
-packages <- c("readr", "tidyverse", "httr", "jsonlite", "readxl", "ggrepel", "stargazer")
+packages <- c("readr", "tidyverse", "httr", "jsonlite", "readxl", "ggrepel", "stargazer", "shiny", "plotly")
 
 install_if_missing <- function(pkg) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
@@ -807,10 +807,10 @@ line_color <- custom_palette[1]
 
 city_set_labels <- c(
   london_only = "London only",
-  top_4 = "Top 4 cities by population",
-  top_6 = "Top 6 cities by population",
-  university_cities = "London, Oxford & Cambridge",
-  top_10 = "Top 10 cities by population"
+  top_4 = "4 largest cities (London, Birmingham, Leeds, Liverpool)",
+  top_6 = "6 largest cities (London, Birmingham, ... Sheffield, Manchester)",
+  university_cities = "University cities (London, Oxford, Cambridge)",
+  top_10 = "10 largest cities (London, Birmingham, ... Coventry, Bradford)"    
 )
 
 param_caption <- sprintf("Parameters: \u03B3=%.2f, \u03B8=%.2f, \u03C3=%.3f, \u03B2=%.3f, \u03BB=%.2f",
