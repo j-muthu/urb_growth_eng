@@ -533,21 +533,21 @@ find_marginal_city <- function(cf_data, cf_prep) {
   marginal_city_index <- num_cities
   
   for (i in 1:num_cities) {
-    marg_row <- sorted_data %>% filter(city_order == marginal_city_index)
-    
+    marg_c      <- sorted_data$c_21_cf[marginal_city_index]
+    marg_cumpop <- sorted_data$cumpop[marginal_city_index]
+
     # City already exceeds total population — not viable
-    if (nrow(marg_row) == 0 || marg_row$cumpop > pop_totals$tot_21) {
+    if (marg_cumpop > pop_totals$tot_21) {
       marginal_city_index <- marginal_city_index - 1
       if (marginal_city_index < 1) break
       next
     }
-    
-    # Rural threshold: how many people would be rural if this city is marginal?
-    urban_pop <- marg_row$cumpop
-    rural_pop <- pop_totals$tot_21 - urban_pop
+
+    # Rural threshold
+    rural_pop <- pop_totals$tot_21 - marg_cumpop
     c_21_rural_threshold <- rur_21_prod * rural_pop^(-params$lambda)
-    
-    if (c_21_rural_threshold > marg_row$c_21_cf) {
+
+    if (c_21_rural_threshold > marg_c) {
       marginal_city_index <- marginal_city_index - 1
       if (marginal_city_index < 1) break
     } else {
