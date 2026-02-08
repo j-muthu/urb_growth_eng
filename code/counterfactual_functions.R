@@ -399,7 +399,8 @@ create_line_chart <- function(data, city_set_name, y_var, ylabel,
     scale_x_continuous(
       name = "Counterfactual permitting rate",
       breaks = seq(0, 0.20, by = 0.02),
-      labels = scales::number_format(accuracy = 0.01)
+      labels = scales::number_format(accuracy = 0.01),
+      expand = expansion(mult = c(0, 0.02))
     ) +
     scale_y_continuous(name = ylabel, expand = expansion(mult = c(0, 0.05))) +
     theme_minimal() +
@@ -447,7 +448,8 @@ create_agg_multi_set_chart <- function(data, y_var, ylabel, title_metric,
     scale_x_continuous(
       name = "Counterfactual permitting rate",
       breaks = seq(0, 0.20, by = 0.02),
-      labels = scales::number_format(accuracy = 0.01)
+      labels = scales::number_format(accuracy = 0.01),
+      expand = expansion(mult = c(0, 0.02))
     ) +
     scale_y_continuous(name = ylabel, expand = expansion(mult = c(0, 0.05))) +
     scale_color_manual(values = colors, name = "City set") +
@@ -498,7 +500,8 @@ create_city_line_chart <- function(city_data_plot, city_set_name, y_var, ylabel,
     scale_x_continuous(
       name = "Counterfactual permitting rate",
       breaks = seq(0, 0.20, by = 0.02),
-      labels = scales::number_format(accuracy = 0.01)
+      labels = scales::number_format(accuracy = 0.01),
+      expand = expansion(mult = c(0, 0.02))
     ) +
     scale_y_continuous(name = ylabel, expand = expansion(mult = c(0, 0.05))) +
     scale_color_manual(values = colors, name = "City") +
