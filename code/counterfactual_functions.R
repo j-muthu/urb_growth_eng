@@ -210,13 +210,11 @@ find_marginal_city <- function(cf_data, cf_prep) {
   sorted_data$city_order <- seq_len(nrow(sorted_data))
   sorted_data$cumpop <- cumsum(sorted_data$pop_21_cf)
 
-  num_cities <- nrow(sorted_data)
-  marginal_city_index <- num_cities
+  marginal_city_index <- nrow(sorted_data)
 
-  for (i in 1:num_cities) {
+  while (marginal_city_index >= 1) {
     if (sorted_data$cumpop[marginal_city_index] > pop_totals$tot_21) {
       marginal_city_index <- marginal_city_index - 1
-      if (marginal_city_index < 1) break
       next
     }
 
@@ -226,7 +224,6 @@ find_marginal_city <- function(cf_data, cf_prep) {
 
     if (c_21_rural_threshold > sorted_data$c_21_cf[marginal_city_index]) {
       marginal_city_index <- marginal_city_index - 1
-      if (marginal_city_index < 1) break
     } else {
       break
     }
@@ -321,11 +318,11 @@ run_sweep <- function(city_set_name, cities_in_cf, rate_sequence,
 
   in_cf <- cf_prep$data$in_counterfact == 1L
   base_rate <- cf_prep$data$bua_perm_rate_01_21
+  perm_rate_cf <- base_rate
 
   for (r in seq_along(rate_sequence)) {
     target_rate <- rate_sequence[r]
 
-    perm_rate_cf <- base_rate
     perm_rate_cf[in_cf] <- pmax(base_rate[in_cf], target_rate)
 
     result <- run_single_counterfactual(cf_prep, perm_rate_cf)
