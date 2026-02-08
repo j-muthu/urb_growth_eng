@@ -179,15 +179,14 @@ prepare_counterfactual_data <- function(city_data, cities_in_cf, params, pop_tot
 }
 
 compute_cf_populations <- function(cf_prep, perm_rate_cf) {
-  cf_prep$data %>%
-    mutate(
-      perm_rate_counterfact = perm_rate_cf,
-      bua_21_pop_counterfact = if_else(
-        in_counterfact == 1,
-        (perm_rate_counterfact / bua_perm_rate_01_21) * (bua_21_pop - bua_01_pop) + bua_01_pop,
-        as.numeric(bua_21_pop)
-      )
-    )
+  d <- cf_prep$data
+  d$perm_rate_counterfact <- perm_rate_cf
+  d$bua_21_pop_counterfact <- d$bua_21_pop
+  mask <- d$in_counterfact == 1L
+  d$bua_21_pop_counterfact[mask] <-
+    (perm_rate_cf[mask] / d$bua_perm_rate_01_21[mask]) *
+    (d$bua_21_pop[mask] - d$bua_01_pop[mask]) + d$bua_01_pop[mask]
+  d
 }
 
 find_marginal_city <- function(cf_data, cf_prep) {
@@ -199,36 +198,33 @@ find_marginal_city <- function(cf_data, cf_prep) {
   gamma <- params$gamma; theta <- params$theta
   sigma <- params$sigma; beta <- params$beta
 
-  sorted_data <- cf_data %>%
-    mutate(
-      pop_21_cf = bua_21_pop_counterfact,
-      y_21_cf = (y_21 / bua_21_pop^(sigma + beta)) * pop_21_cf^(sigma + beta),
-      c_21_cf = y_21_cf - (1 / (gamma + 1)) * tau_21 *
-        geographic_constraint^gamma * pop_21_cf^(gamma + theta)
-    ) %>%
-    arrange(desc(c_21_cf)) %>%
-    mutate(
-      city_order = row_number(),
-      cumpop = cumsum(pop_21_cf)
-    )
+  sorted_data <- cf_data
+  sorted_data$pop_21_cf <- sorted_data$bua_21_pop_counterfact
+  sorted_data$y_21_cf <- (sorted_data$y_21 / sorted_data$bua_21_pop^(sigma + beta)) *
+    sorted_data$pop_21_cf^(sigma + beta)
+  sorted_data$c_21_cf <- sorted_data$y_21_cf - (1 / (gamma + 1)) * tau_21 *
+    sorted_data$geographic_constraint^gamma * sorted_data$pop_21_cf^(gamma + theta)
+
+  ord <- order(sorted_data$c_21_cf, decreasing = TRUE)
+  sorted_data <- sorted_data[ord, ]
+  sorted_data$city_order <- seq_len(nrow(sorted_data))
+  sorted_data$cumpop <- cumsum(sorted_data$pop_21_cf)
 
   num_cities <- nrow(sorted_data)
   marginal_city_index <- num_cities
 
   for (i in 1:num_cities) {
-    marg_row <- sorted_data %>% filter(city_order == marginal_city_index)
-
-    if (nrow(marg_row) == 0 || marg_row$cumpop > pop_totals$tot_21) {
+    if (sorted_data$cumpop[marginal_city_index] > pop_totals$tot_21) {
       marginal_city_index <- marginal_city_index - 1
       if (marginal_city_index < 1) break
       next
     }
 
-    urban_pop <- marg_row$cumpop
+    urban_pop <- sorted_data$cumpop[marginal_city_index]
     rural_pop <- pop_totals$tot_21 - urban_pop
     c_21_rural_threshold <- rur_21_prod * rural_pop^(-params$lambda)
 
-    if (c_21_rural_threshold > marg_row$c_21_cf) {
+    if (c_21_rural_threshold > sorted_data$c_21_cf[marginal_city_index]) {
       marginal_city_index <- marginal_city_index - 1
       if (marginal_city_index < 1) break
     } else {
@@ -236,22 +232,22 @@ find_marginal_city <- function(cf_data, cf_prep) {
     }
   }
 
-  pop_cum_final <- sorted_data %>%
-    filter(city_order <= marginal_city_index) %>%
-    summarise(total = sum(pop_21_cf)) %>%
-    pull(total)
+  pop_cum_final <- if (marginal_city_index >= 1) {
+    sorted_data$cumpop[marginal_city_index]
+  } else {
+    0
+  }
 
   c_21_rural_threshold <- rur_21_prod * (pop_totals$tot_21 - pop_cum_final)^(-params$lambda)
 
-  final_data <- sorted_data %>%
-    mutate(
-      pop_21_cf = if_else(city_order > marginal_city_index, NA_real_, pop_21_cf),
-      y_21_cf = if_else(is.na(pop_21_cf), NA_real_, y_21_cf),
-      c_21_cf = if_else(is.na(pop_21_cf), NA_real_, c_21_cf),
-      c_21_rural_threshold = c_21_rural_threshold,
-      perm_21_counterfact = c_21_cf - c_21_rural_threshold,
-      pop_21_incumb_counterfact = pmin(pop_21_cf, pop_21_incumb)
-    )
+  excluded <- sorted_data$city_order > marginal_city_index
+  sorted_data$pop_21_cf[excluded] <- NA_real_
+  sorted_data$y_21_cf[excluded] <- NA_real_
+  sorted_data$c_21_cf[excluded] <- NA_real_
+  sorted_data$c_21_rural_threshold <- c_21_rural_threshold
+  sorted_data$perm_21_counterfact <- sorted_data$c_21_cf - c_21_rural_threshold
+  sorted_data$pop_21_incumb_counterfact <- pmin(sorted_data$pop_21_cf, sorted_data$pop_21_incumb)
+  final_data <- sorted_data
 
   list(
     data = final_data,
@@ -302,11 +298,9 @@ run_single_counterfactual <- function(cf_prep, perm_rate_cf) {
   marg_result <- find_marginal_city(cf_pop_data, cf_prep)
   welfare <- compute_welfare_metrics(marg_result, cf_prep)
 
-  final_data <- marg_result$data %>%
-    mutate(
-      pct_chg_y = 100 * (y_21_cf - y_21) / y_21,
-      pct_chg_c = 100 * (c_21_cf - c_21) / c_21
-    )
+  final_data <- marg_result$data
+  final_data$pct_chg_y <- 100 * (final_data$y_21_cf - final_data$y_21) / final_data$y_21
+  final_data$pct_chg_c <- 100 * (final_data$c_21_cf - final_data$c_21) / final_data$c_21
 
   list(data = final_data, welfare = welfare)
 }
@@ -325,28 +319,25 @@ run_sweep <- function(city_set_name, cities_in_cf, rate_sequence,
   city_income_results <- vector("list", length(rate_sequence))
   city_cons_results <- vector("list", length(rate_sequence))
 
-  # Pre-compute counterfactual consumption (doesn't change between iterations)
-  cf_cons_base <- cf_prep$data %>%
-    select(BUA22NM, bua_perm_rate_01_21, bua_21_pop, bua_01_pop, in_counterfact)
+  in_cf <- cf_prep$data$in_counterfact == 1L
+  base_rate <- cf_prep$data$bua_perm_rate_01_21
 
   for (r in seq_along(rate_sequence)) {
     target_rate <- rate_sequence[r]
 
-    perm_rate_cf <- cf_prep$data %>%
-      mutate(rate = if_else(in_counterfact == 1,
-        pmax(bua_perm_rate_01_21, target_rate),
-        bua_perm_rate_01_21)
-      ) %>%
-      pull(rate)
+    perm_rate_cf <- base_rate
+    perm_rate_cf[in_cf] <- pmax(base_rate[in_cf], target_rate)
 
     result <- run_single_counterfactual(cf_prep, perm_rate_cf)
 
-    treated <- result$data %>% filter(in_counterfact == 1, !is.na(pct_chg_y))
-    pct_chg_y_cities <- if (nrow(treated) > 0) {
-      sum(treated$pct_chg_y * treated$bua_21_pop) / sum(treated$bua_21_pop)
+    rd <- result$data
+    treated_idx <- which(rd$in_counterfact == 1L & !is.na(rd$pct_chg_y))
+    pct_chg_y_cities <- if (length(treated_idx) > 0) {
+      sum(rd$pct_chg_y[treated_idx] * rd$bua_21_pop[treated_idx]) /
+        sum(rd$bua_21_pop[treated_idx])
     } else NA_real_
 
-    agg_results[[r]] <- tibble(
+    agg_results[[r]] <- data.frame(
       target_rate = target_rate,
       pct_chg_newcomer_cons = result$welfare$pct_chg_c_rur,
       pct_chg_incumbent_cons = result$welfare$pct_chg_c_tot,
@@ -354,26 +345,37 @@ run_sweep <- function(city_set_name, cities_in_cf, rate_sequence,
       pct_chg_city_income_pc = pct_chg_y_cities
     )
 
-    city_income_results[[r]] <- treated %>%
-      select(BUA22NM, bua_21_pop, pct_chg_y) %>%
-      mutate(target_rate = target_rate)
+    city_income_results[[r]] <- data.frame(
+      BUA22NM = rd$BUA22NM[treated_idx],
+      bua_21_pop = rd$bua_21_pop[treated_idx],
+      pct_chg_y = rd$pct_chg_y[treated_idx],
+      target_rate = target_rate,
+      stringsAsFactors = FALSE
+    )
 
-    city_cons_results[[r]] <- treated %>%
-      select(BUA22NM, bua_21_pop, pct_chg_c) %>%
-      mutate(target_rate = target_rate)
+    city_cons_results[[r]] <- data.frame(
+      BUA22NM = rd$BUA22NM[treated_idx],
+      bua_21_pop = rd$bua_21_pop[treated_idx],
+      pct_chg_c = rd$pct_chg_c[treated_idx],
+      target_rate = target_rate,
+      stringsAsFactors = FALSE
+    )
 
     if (!is.null(progress_callback)) {
       progress_callback(r, length(rate_sequence))
     }
   }
 
-  list(
-    agg = bind_rows(agg_results) %>% mutate(city_set = city_set_name),
-    city_income = bind_rows(city_income_results) %>%
-      mutate(city_set = city_set_name),
-    city_cons = bind_rows(city_cons_results) %>%
-      mutate(city_set = city_set_name)
-  )
+  agg <- do.call(rbind, agg_results)
+  agg$city_set <- city_set_name
+
+  city_income <- do.call(rbind, city_income_results)
+  city_income$city_set <- city_set_name
+
+  city_cons <- do.call(rbind, city_cons_results)
+  city_cons$city_set <- city_set_name
+
+  list(agg = agg, city_income = city_income, city_cons = city_cons)
 }
 
 #_______________________________________________________________________________
