@@ -157,9 +157,9 @@ function(input, output, session) {
   })
 
   output$plot_incumbent_cons <- renderPlotly({
-    render_agg_chart("pct_chg_incumbent_cons",
+    render_agg_chart("pct_chg_cons_total",
                      "% change in consumption",
-                     "Change in incumbent consumption (aggregate)")
+                     "Change in national consumption per capita")
   })
 
   #_____________________________________________________________________________

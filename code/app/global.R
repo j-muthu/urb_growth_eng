@@ -98,10 +98,10 @@ city_at_max <- city_data %>%
 
 reference_rates <- tibble(
   label = c(
-    sprintf("75th pct (%s)", city_at_75),
-    sprintf("95th pct (%s)", city_at_95),
-    sprintf("UK Max (%s)", city_at_max),
-    "Austin, TX"
+    sprintf("75th percentile (%s)", city_at_75),
+    sprintf("95th percentile (%s)", city_at_95),
+    sprintf("Max UK permitting rate (%s)", city_at_max),
+    "Austin, TX permitting rate"
   ),
   rate = c(pct_75, pct_95, max_uk_rate, austin_rate)
 )
@@ -110,8 +110,8 @@ reference_rates <- tibble(
 # RATE SEQUENCE ####
 #_______________________________________________________________________________
 
-rate_start <- floor(pct_75 * 100) / 100
-rate_end <- 0.13
+rate_start <- floor((pct_75 - 0.005) * 100) / 100
+rate_end <- ceiling((austin_rate + 0.005) * 100) / 100
 rate_increment <- 0.001
 rate_sequence <- seq(rate_start, rate_end, by = rate_increment)
 

@@ -393,10 +393,10 @@ city_at_max <- city_data %>%
 
 reference_rates <- tibble(
   label = c(
-    sprintf("75th pct (%s)", city_at_75),
-    sprintf("95th pct (%s)", city_at_95),
-    sprintf("UK Max (%s)", city_at_max),
-    "Austin, TX"
+    sprintf("75th percentile (%s)", city_at_75),
+    sprintf("95th percentile (%s)", city_at_95),
+    sprintf("Max UK permitting rate (%s)", city_at_max),
+    "Austin, TX permitting rate"
   ),
   rate = c(pct_75, pct_95, max_uk_rate, austin_rate)
 )
@@ -405,8 +405,8 @@ message("\nReference rates:")
 print(reference_rates)
 
 # Permitting rate sweep
-rate_start <- floor(pct_75 * 100) / 100
-rate_end <- 0.13
+rate_start <- floor((pct_75 - 0.005) * 100) / 100
+rate_end <- ceiling((austin_rate + 0.005) * 100) / 100
 rate_increment <- 0.001
 rate_sequence <- seq(rate_start, rate_end, by = rate_increment)
 
@@ -464,12 +464,14 @@ create_line_chart <- function(data, city_set_name, y_var, ylabel, title_metric, 
               angle = 90, hjust = 1.1, vjust = -0.3, size = 2.5, color = "gray30") +
     scale_x_continuous(
       name = "Counterfactual permitting rate",
+      breaks = seq(0, 0.20, by = 0.02),
       labels = scales::number_format(accuracy = 0.01)
     ) +
-    scale_y_continuous(name = ylabel) +
+    scale_y_continuous(name = ylabel, expand = expansion(mult = c(0, 0.05))) +
     theme_minimal() +
     theme(
       panel.grid.minor = element_blank(),
+      axis.line = element_line(color = "black", linewidth = 0.3),
       plot.title = element_text(size = 12, face = "bold"),
       plot.subtitle = element_text(size = 9, color = "gray40")
     ) +
@@ -516,13 +518,15 @@ create_city_line_chart <- function(city_data, city_set_name, y_var, ylabel,
               inherit.aes = FALSE) +
     scale_x_continuous(
       name = "Counterfactual permitting rate",
+      breaks = seq(0, 0.20, by = 0.02),
       labels = scales::number_format(accuracy = 0.01)
     ) +
-    scale_y_continuous(name = ylabel) +
+    scale_y_continuous(name = ylabel, expand = expansion(mult = c(0, 0.05))) +
     scale_color_manual(values = colors, name = "City") +
     theme_minimal() +
     theme(
       panel.grid.minor = element_blank(),
+      axis.line = element_line(color = "black", linewidth = 0.3),
       plot.title = element_text(size = 12, face = "bold"),
       plot.subtitle = element_text(size = 9, color = "gray40"),
       legend.position = "right"
@@ -556,10 +560,10 @@ for (cs in names(cities_sets)) {
                     "Change in national income per capita",
                     "national_income_pc")
   
-  create_line_chart(agg_summary, cs, "pct_chg_incumbent_cons",
+  create_line_chart(agg_summary, cs, "pct_chg_cons_total",
                     "% change in consumption",
-                    "Change in incumbent consumption (aggregate)",
-                    "incumbent_cons_agg")
+                    "Change in national consumption per capita",
+                    "national_cons_pc")
   
   create_city_line_chart(city_income_summary, cs, "pct_chg_y",
                          "% change in income per capita",

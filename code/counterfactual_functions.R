@@ -340,7 +340,7 @@ run_sweep <- function(city_set_name, cities_in_cf, rate_sequence,
     agg_results[[r]] <- data.frame(
       target_rate = target_rate,
       pct_chg_newcomer_cons = result$welfare$pct_chg_c_rur,
-      pct_chg_incumbent_cons = result$welfare$pct_chg_c_tot,
+      pct_chg_cons_total = result$welfare$pct_chg_c_tot,
       pct_chg_national_income_pc = result$welfare$pct_chg_y_tot,
       pct_chg_city_income_pc = pct_chg_y_cities
     )
@@ -401,12 +401,14 @@ create_line_chart <- function(data, city_set_name, y_var, ylabel,
                linetype = "dashed", color = "gray40", linewidth = 0.5) +
     scale_x_continuous(
       name = "Counterfactual permitting rate",
+      breaks = seq(0, 0.20, by = 0.02),
       labels = scales::number_format(accuracy = 0.01)
     ) +
-    scale_y_continuous(name = ylabel) +
+    scale_y_continuous(name = ylabel, expand = expansion(mult = c(0, 0.05))) +
     theme_minimal() +
     theme(
       panel.grid.minor = element_blank(),
+      axis.line = element_line(color = "black", linewidth = 0.3),
       plot.title = element_text(size = 12, face = "bold"),
       plot.subtitle = element_text(size = 9, color = "gray40")
     ) +
@@ -447,13 +449,15 @@ create_agg_multi_set_chart <- function(data, y_var, ylabel, title_metric,
                linetype = "dashed", color = "gray40", linewidth = 0.5) +
     scale_x_continuous(
       name = "Counterfactual permitting rate",
+      breaks = seq(0, 0.20, by = 0.02),
       labels = scales::number_format(accuracy = 0.01)
     ) +
-    scale_y_continuous(name = ylabel) +
+    scale_y_continuous(name = ylabel, expand = expansion(mult = c(0, 0.05))) +
     scale_color_manual(values = colors, name = "City set") +
     theme_minimal() +
     theme(
       panel.grid.minor = element_blank(),
+      axis.line = element_line(color = "black", linewidth = 0.3),
       plot.title = element_text(size = 12, face = "bold"),
       plot.subtitle = element_text(size = 9, color = "gray40"),
       legend.position = "right"
@@ -496,13 +500,15 @@ create_city_line_chart <- function(city_data_plot, city_set_name, y_var, ylabel,
                linetype = "dashed", color = "gray40", linewidth = 0.5) +
     scale_x_continuous(
       name = "Counterfactual permitting rate",
+      breaks = seq(0, 0.20, by = 0.02),
       labels = scales::number_format(accuracy = 0.01)
     ) +
-    scale_y_continuous(name = ylabel) +
+    scale_y_continuous(name = ylabel, expand = expansion(mult = c(0, 0.05))) +
     scale_color_manual(values = colors, name = "City") +
     theme_minimal() +
     theme(
       panel.grid.minor = element_blank(),
+      axis.line = element_line(color = "black", linewidth = 0.3),
       plot.title = element_text(size = 12, face = "bold"),
       plot.subtitle = element_text(size = 9, color = "gray40"),
       legend.position = "right"

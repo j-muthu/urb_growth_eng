@@ -3939,19 +3939,19 @@
     "Outputs/city_incumbent_cons_university_cities.png": {
       "checksum": "ff4beb7b9008f62b3f8d7a369d094215"
     },
-    "Outputs/incumbent_cons_agg_london_only.png": {
+    "Outputs/national_cons_pc_london_only.png": {
       "checksum": "bf261bd45d10cc672255fa72dc8fcfdc"
     },
-    "Outputs/incumbent_cons_agg_top_10.png": {
+    "Outputs/national_cons_pc_top_10.png": {
       "checksum": "3739300db4d4088cf5198e5d6f0652ba"
     },
-    "Outputs/incumbent_cons_agg_top_4.png": {
+    "Outputs/national_cons_pc_top_4.png": {
       "checksum": "76d3d1822ba7c3eec7450180ac30bef6"
     },
-    "Outputs/incumbent_cons_agg_top_6.png": {
+    "Outputs/national_cons_pc_top_6.png": {
       "checksum": "ce20f694b69830e1774ca368a7ae8d2d"
     },
-    "Outputs/incumbent_cons_agg_university_cities.png": {
+    "Outputs/national_cons_pc_university_cities.png": {
       "checksum": "0d0a7b19d319d963731f9629f84a2020"
     },
     "Outputs/national_income_pc_london_only.png": {
