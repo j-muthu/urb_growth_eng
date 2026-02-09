@@ -548,6 +548,58 @@ create_city_line_chart <- function(city_data, city_set_name, y_var, ylabel,
 }
 
 #-------------------------------------------------------------------------------
+# All-sets overlay chart (all 5 city sets on one chart)
+#-------------------------------------------------------------------------------
+create_all_sets_chart <- function(data, y_var, ylabel, title_metric, filename_suffix) {
+
+  plot_data <- data
+  plot_data$city_set_label <- city_set_labels[plot_data$city_set]
+  plot_data$city_set_label <- factor(plot_data$city_set_label,
+                                     levels = city_set_labels)
+
+  n_sets <- length(city_set_labels)
+  colors <- custom_palette[1:n_sets]
+  names(colors) <- city_set_labels
+
+  p <- ggplot(plot_data, aes(x = target_rate, y = .data[[y_var]],
+                             color = city_set_label, group = city_set_label)) +
+    geom_line(linewidth = 0.8) +
+    geom_hline(yintercept = 0, linetype = "solid", color = "gray60", linewidth = 0.3) +
+    geom_vline(data = reference_rates, aes(xintercept = rate),
+               linetype = "dashed", color = "gray40", linewidth = 0.5) +
+    geom_text(data = reference_rates, aes(x = rate, y = Inf, label = label),
+              angle = 90, hjust = 1.1, vjust = -0.3, size = 2.5, color = "gray30",
+              inherit.aes = FALSE) +
+    scale_x_continuous(
+      name = "Counterfactual permitting rate",
+      breaks = seq(0, 0.20, by = 0.02),
+      labels = scales::number_format(accuracy = 0.01),
+      expand = expansion(mult = c(0, 0.02))
+    ) +
+    scale_y_continuous(name = ylabel, expand = expansion(mult = c(0, 0.05))) +
+    scale_color_manual(values = colors, name = "City set") +
+    theme_minimal() +
+    theme(
+      panel.grid.minor = element_blank(),
+      axis.line = element_line(color = "black", linewidth = 0.3),
+      plot.title = element_text(size = 12, face = "bold"),
+      plot.subtitle = element_text(size = 9, color = "gray40"),
+      legend.position = "right"
+    ) +
+    labs(
+      title = title_metric,
+      subtitle = "Central parameter estimates",
+      caption = param_caption
+    )
+
+  ggsave(
+    file.path("Outputs", sprintf("%s_all_sets.png", filename_suffix)),
+    p, width = 26, height = 14, units = "cm", dpi = 320
+  )
+  p
+}
+
+#-------------------------------------------------------------------------------
 # Generate all charts
 #-------------------------------------------------------------------------------
 for (cs in names(cities_sets)) {
@@ -578,6 +630,26 @@ for (cs in names(cities_sets)) {
                          "Change in incumbent consumption by city",
                          "city_incumbent_cons")
 }
+
+#-------------------------------------------------------------------------------
+# Generate all-sets overlay charts
+#-------------------------------------------------------------------------------
+message("Creating all-sets overlay charts")
+
+create_all_sets_chart(agg_summary, "pct_chg_newcomer_cons",
+                      "% change in consumption",
+                      "Change in newcomer consumption",
+                      "newcomer_cons")
+
+create_all_sets_chart(agg_summary, "pct_chg_national_income_pc",
+                      "% change in income per capita",
+                      "Change in national income per capita",
+                      "national_income_pc")
+
+create_all_sets_chart(agg_summary, "pct_chg_cons_total",
+                      "% change in consumption",
+                      "Change in national consumption per capita",
+                      "national_cons_pc")
 
 message("\n=== ALL CHARTS GENERATED ===\n")
 

@@ -63,9 +63,9 @@ custom_palette <- c(
 city_set_labels <- c(
   london_only = "London only",
   top_4 = "4 largest cities (London, Birmingham, Leeds, Liverpool)",
-  top_6 = "6 largest cities (London, Birmingham, ... Manchester)",
+  top_6 = "6 largest cities (London - Manchester)",
   university_cities = "University cities (London, Oxford, Cambridge)",
-  top_10 = "10 largest cities (London, Birmingham, ... Bradford)"
+  top_10 = "10 largest cities (London - Bradford)"
 )
 
 #_______________________________________________________________________________
