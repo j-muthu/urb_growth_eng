@@ -3,4 +3,5 @@ code/Outputs/*
 todo.txt
 .R*
 **/.R*
-**/**/.R*
+wrluri/*.csv
+wrluri/*.dta
