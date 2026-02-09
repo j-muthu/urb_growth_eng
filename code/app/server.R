@@ -5,6 +5,45 @@
 function(input, output, session) {
 
   #_____________________________________________________________________________
+  # HELPER: title wrapping ####
+  #_____________________________________________________________________________
+
+  apply_title_wrap <- function(p_plotly, gg_plot) {
+    title_text <- gg_plot$labels$title %||% ""
+    wrapped <- stringr::str_wrap(title_text, width = 80)
+    n_lines <- length(strsplit(wrapped, "\n")[[1]])
+    top_margin <- 60 + (n_lines - 1) * 20
+    p_plotly %>% plotly::layout(
+      title = list(text = gsub("\n", "<br>", wrapped)),
+      margin = list(t = top_margin)
+    )
+  }
+
+  #_____________________________________________________________________________
+  # HELPER: client-side responsive layout via ResizeObserver ####
+  #_____________________________________________________________________________
+
+  make_responsive <- function(p_plotly) {
+    htmlwidgets::onRender(p_plotly, "
+      function(el, x) {
+        function adjust() {
+          var w = el.getBoundingClientRect().width;
+          var update = {};
+          if (w < 600) {
+            update.legend = {orientation: 'h', x: 0, y: -0.2};
+            update['xaxis.tickangle'] = -45;
+          } else {
+            update.legend = {orientation: 'v', x: 1.02, y: 1};
+            update['xaxis.tickangle'] = 0;
+          }
+          Plotly.relayout(el, update);
+        }
+        new ResizeObserver(adjust).observe(el);
+      }
+    ")
+  }
+
+  #_____________________________________________________________________________
   # HELPER: add reference rate annotations to plotly object ####
   #_____________________________________________________________________________
 
@@ -141,7 +180,9 @@ function(input, output, session) {
 
     ggplotly(p, tooltip = "text") %>%
       plotly::layout(hovermode = "x unified") %>%
-      add_ref_annotations(reference_rates)
+      apply_title_wrap(p) %>%
+      add_ref_annotations(reference_rates) %>%
+      make_responsive()
   }
 
   output$plot_newcomer_cons <- renderPlotly({
@@ -177,7 +218,9 @@ function(input, output, session) {
     )
     ggplotly(p, tooltip = "text") %>%
       plotly::layout(hovermode = "x unified") %>%
-      add_ref_annotations(reference_rates)
+      apply_title_wrap(p) %>%
+      add_ref_annotations(reference_rates) %>%
+      make_responsive()
   }
 
   # --- Dynamic UI: sub-tabs when "all", single chart otherwise ---

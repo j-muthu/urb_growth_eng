@@ -496,7 +496,8 @@ create_city_line_chart <- function(city_data, city_set_name, y_var, ylabel,
                                    title_metric, filename_suffix) {
   
   plot_data <- city_data %>% filter(city_set == city_set_name)
-  
+  plot_data$BUA22NM <- sub("Cambridge \\(Cambridge\\)", "Cambridge", plot_data$BUA22NM)
+
   city_order <- plot_data %>%
     distinct(BUA22NM, bua_21_pop) %>%
     arrange(desc(bua_21_pop)) %>%

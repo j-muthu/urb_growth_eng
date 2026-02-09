@@ -63,9 +63,9 @@ custom_palette <- c(
 city_set_labels <- c(
   london_only = "London only",
   top_4 = "4 largest cities (London, Birmingham, Leeds, Liverpool)",
-  top_6 = "6 largest cities (London, Birmingham, ... Sheffield, Manchester)",
+  top_6 = "6 largest cities (London, Birmingham, ... Manchester)",
   university_cities = "University cities (London, Oxford, Cambridge)",
-  top_10 = "10 largest cities (London, Birmingham, ... Coventry, Bradford)"
+  top_10 = "10 largest cities (London, Birmingham, ... Bradford)"
 )
 
 #_______________________________________________________________________________
@@ -473,7 +473,9 @@ create_city_line_chart <- function(city_data_plot, city_set_name, y_var, ylabel,
                                    title_metric, reference_rates, params) {
 
   plot_data <- city_data_plot %>%
-    filter(city_set == city_set_name) %>%
+    filter(city_set == city_set_name)
+  plot_data$BUA22NM <- sub("Cambridge \\(Cambridge\\)", "Cambridge", plot_data$BUA22NM)
+  plot_data <- plot_data %>%
     mutate(text = sprintf("City: %s\nPermitting rate: %.3f\n%s: %.2f%%",
                           BUA22NM, target_rate, ylabel, .data[[y_var]]))
 
