@@ -444,7 +444,7 @@ message("\n=== GENERATING LINE CHARTS ===\n")
 
 line_color <- custom_palette[1]
 
-param_caption <- sprintf("Parameters: \u03B3=%.2f, \u03B8=%.2f, \u03C3=%.3f, \u03B2=%.3f, \u03BB=%.2f",
+param_caption <- sprintf("Parameters: \u03B3=%.2f, \u03B8=%.2f, \u03C3=%.3f, \u03B2=%.3f, \u03BB=%.3f",
                          PARAMS_CENTRAL$gamma, PARAMS_CENTRAL$theta,
                          PARAMS_CENTRAL$sigma, PARAMS_CENTRAL$beta, PARAMS_CENTRAL$lambda)
 
