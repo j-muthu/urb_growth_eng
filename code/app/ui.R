@@ -36,7 +36,7 @@ fluidPage(
 
       sliderInput("lambda", "\u03BB (land share in rural prod.)",
                   min = PARAM_LAMBDA$min, max = PARAM_LAMBDA$max,
-                  value = PARAM_LAMBDA$central, step = 0.01),
+                  value = PARAM_LAMBDA$central, step = 0.001),
 
       hr(),
 
