@@ -53,10 +53,6 @@ fluidPage(
       tabsetPanel(
         id = "chart_tabs",
 
-        tabPanel("Newcomer Consumption",
-                 br(),
-                 plotlyOutput("plot_newcomer_cons", height = "550px")),
-
         tabPanel("National Income",
                  br(),
                  plotlyOutput("plot_national_income", height = "550px")),
@@ -64,6 +60,10 @@ fluidPage(
         tabPanel("National Consumption",
                  br(),
                  plotlyOutput("plot_incumbent_cons", height = "550px")),
+
+        tabPanel("Newcomer Consumption",
+                 br(),
+                 plotlyOutput("plot_newcomer_cons", height = "550px")),
 
         tabPanel("City Income",
                  br(),
