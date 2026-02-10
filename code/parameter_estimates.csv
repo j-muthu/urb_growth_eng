@@ -1,6 +1,6 @@
-parameter,description,min,central,max,unit,source
-gamma,Elasticity of commuting cost w.r.t. distance,0.03,0.05,0.08,unitless,"UK adaptation of DP (2023) Table I p.2238; lower UK values reflect shorter commuting distances (DfT NTS)"
-theta,Population elasticity of congestion (travel speed),0.05,0.06,0.07,unitless,"UK adapted from DP (2023) Table I p.2238 cols 4-5; higher UK values reflect denser road networks"
-sigma,Short-run agglomeration elasticity,0.008,0.025,0.038,unitless,"Graham & Melo (2011); Bosquet & Overman (2019); Rice et al. (2006); UK estimates ~63% of US"
-beta,Learning/experience agglomeration elasticity,0.01,0.015,0.03,unitless,"D'Costa & Overman (2014); De la Roca & Puga (2017) UK adaptation"
-lambda,Land share in rural production,0.10,0.12,0.16,unitless,"Valentinyi & Herrendorf (2008) p.1977; adapted for UK land share"
+parameter,description,us_value,min,central,max,unit,source
+gamma,Elasticity of commuting cost w.r.t. distance,0.07,0.03,0.05,0.08,unitless,"Combes, Duranton & Gobillon (2019)"
+theta,Population elasticity of congestion (travel speed),0.04,0.05,0.07,0.08,unitless,"Gehr & Pflüger (2024)"
+sigma,Short-run agglomeration elasticity,0.04,0.008,0.025,0.0538,unitless,"Graham & Melo (2009); Bosquet & Overman (2019); Gibbons & Graham (2018)"
+beta,Learning/experience agglomeration elasticity,0.04,0.01,0.025,0.04,unitless,"D'Costa & Overman (2014); De la Roca & Puga (2017)"
+lambda,Land share in rural production,0.18,0.05,0.072,0.10,unitless,"Cereal and oilseed production in the United Kingdom 2025; USDA Small Grains 2021 Summary; AHDB"

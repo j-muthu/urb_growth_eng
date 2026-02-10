@@ -1,6 +1,8 @@
 # UK Urban Growth Counterfactual Analysis
 
-An interactive Shiny app that estimates the economic effects of relaxing planning regulations in English cities, applying the spatial equilibrium framework of [Duranton & Puga (2023)](https://onlinelibrary.wiley.com/doi/full/10.3982/ECTA17936) to UK data.
+<https://joshua-muthu-urban-growth.share.connect.posit.cloud>
+
+An interactive Shiny app that estimates the economic effects of relaxing planning regulations in English cities. It applies the spatial equilibrium framework of [Duranton & Puga (2023)](https://onlinelibrary.wiley.com/doi/full/10.3982/ECTA17936) to UK data.
 
 Users can adjust model parameters, select which cities to deregulate, and explore how counterfactual permitting rates affect national income, city-level income, and consumption for both incumbents and newcomers.
 
@@ -13,10 +15,10 @@ Key parameters (with UK-adapted central estimates and ranges):
 | Parameter | Description | Central | Range |
 |-----------|-------------|---------|-------|
 | &gamma; | Elasticity of commuting cost w.r.t. distance | 0.05 | 0.03 -- 0.08 |
-| &theta; | Population elasticity of congestion (travel speed) | 0.06 | 0.05 -- 0.07 |
-| &sigma; | Short-run agglomeration elasticity | 0.025 | 0.008 -- 0.038 |
-| &beta; | Learning/experience agglomeration elasticity | 0.015 | 0.01 -- 0.03 |
-| &lambda; | Land share in rural production | 0.12 | 0.10 -- 0.16 |
+| &theta; | Population elasticity of congestion (travel speed) | 0.07 | 0.05 -- 0.08 |
+| &sigma; | Short-run agglomeration elasticity | 0.025 | 0.008 -- 0.0538 |
+| &beta; | Learning/experience agglomeration elasticity | 0.025 | 0.01 -- 0.04 |
+| &lambda; | Land share in rural production | 0.072 | 0.05 -- 0.10 |
 
 Reference permitting rates (75th/95th percentile UK cities, UK max, and Austin TX) are shown as dashed vertical lines on each chart.
 
@@ -34,10 +36,13 @@ urb_growth_eng/
 │   ├── agg_effs_urb_growth_uk.R       # Standalone batch analysis script
 │   ├── parameter_estimates.csv        # Parameter ranges and sources
 │   ├── Data/                          # Input datasets (BUA populations, permits, etc.)
-│   ├── Outputs/                       # Generated CSVs from batch runs
+│   ├── Outputs/                       # Generated CSVs and PNGs from batch runs
 │   └── manifest.json                  # R dependency manifest for deployment
-├── latex/                             # Write-up source files
-└── stata/                             # Supplementary Stata analysis
+├── latex/
+│   ├── body/                          # LaTeX source (main.tex, bibliography, setup)
+│   └── images/                        # Figures used in the write-up
+├── stata/                             # Supplementary Stata analysis
+└── wrluri/                            # Wharton Residential Land Use Regulatory Index data
 ```
 
 ## Running locally
@@ -84,4 +89,4 @@ Get your token and secret from shinyapps.io under Account > Tokens.
 - **City populations:** ONS Built-Up Area (BUA) estimates for 2001, 2011, and 2021
 - **Geographic constraints:** Local Authority District-level geographic constraint variables
 - **Austin permitting data:** City of Austin issued construction permits (for US reference rate)
-- **Parameter estimates:** UK adaptations of Duranton & Puga (2023), Graham & Melo (2011), D'Costa & Overman (2014), and others (see `code/parameter_estimates.csv` for full sourcing)
+- **Parameter estimates:** See `code/parameter_estimates.csv` and the accompanying blog post

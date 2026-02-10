@@ -32,10 +32,10 @@ SKIP_DATA_CONSTRUCTION <- FALSE
 # See parameter_estimates.csv for min/max ranges and full sourcing
 PARAMS_CENTRAL <- list(
   gamma  = 0.05,   # commuting cost elasticity w.r.t. distance
-  theta  = 0.06,   # congestion elasticity w.r.t. city population
+  theta  = 0.07,   # congestion elasticity w.r.t. city population
   sigma  = 0.025,  # short-run agglomeration elasticity
-  beta   = 0.015,  # learning/experience agglomeration elasticity
-  lambda = 0.12    # land share in rural production
+  beta   = 0.025,  # learning/experience agglomeration elasticity
+  lambda = 0.072    # land share in rural production
 )
 
 PERM_DATA_START_ROW <- 33128
