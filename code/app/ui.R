@@ -3,7 +3,7 @@
 #===============================================================================
 
 fluidPage(
-  titlePanel("UK Urban Growth Counterfactual Analysis"),
+  titlePanel("What if England's Planning Regulation was Relaxed?"),
 
   sidebarLayout(
     sidebarPanel(
