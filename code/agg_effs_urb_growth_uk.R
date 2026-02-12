@@ -72,6 +72,8 @@ if (SKIP_DATA_CONSTRUCTION) {
   lsoa_lookup_2011_to_2021_raw <- read_csv(file.path("Data", "LSOA_(2011)_to_LSOA_(2021)_to_LAD_(2022)_Best_Fit_Lookup_for_EW_(V2).csv"))
   lsoa_bua_lookup_2021_raw <- read_csv(file.path("Data", "LSOA_(2021)_to_Built_Up_Area_to_Local_Authority_District_to_Region_(December_2022)_Lookup_in_England_and_Wales_v2.csv"))
   
+  # See https://assets.publishing.service.gov.uk/media/68516a97dc640d9b20f3e92a/District_Matters_-_Data_dictionary.pdf
+  # For Planning Application Statistics Data Dictionary
   perm_rates_raw <- read_csv(file.path("Data", "PS2_data_-_open_data_table__202409_.csv"), skip = 2) %>%
     select(2:4, 34, 112) %>%
     slice(PERM_DATA_START_ROW:n())
@@ -178,7 +180,8 @@ if (SKIP_DATA_CONSTRUCTION) {
   perm_rates_by_year <- perm_rates_raw %>%
     filter(LPACD %in% valid_lad_codes) %>%
     mutate(
-      major_dwellings = as.numeric(na_if(`Total granted; major dwellings (all)`, "..")),
+      # Major dwellings developments have >= 10 houses, so I multiply by 10 as a lower bound
+      major_dwellings = as.numeric(na_if(`Total granted; major dwellings (all)`, "..")) * 10,
       minor_dwellings = as.numeric(na_if(`Total granted; minor dwellings (all)`, "..")),
       year = as.numeric(substr(Quarter, 1, 4))
     ) %>%
