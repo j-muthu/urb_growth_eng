@@ -408,7 +408,7 @@ message("\nReference rates:")
 print(reference_rates)
 
 # Permitting rate sweep
-rate_start <- 0.018
+rate_start <- floor((pct_75 - 0.01) * 100) / 100
 rate_end <- ceiling((austin_rate + 0.005) * 100) / 100
 rate_increment <- 0.001
 rate_sequence <- seq(rate_start, rate_end, by = rate_increment)
