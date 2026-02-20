@@ -1,6 +1,6 @@
 parameter,description,us_value,min,central,max,unit,source
-gamma,Elasticity of commuting cost w.r.t. distance,0.07,0.03,0.05,0.08,unitless,"Combes, Duranton & Gobillon (2019)"
-theta,Population elasticity of congestion (travel speed),0.04,0.05,0.07,0.08,unitless,Gehr & Pflueger (2024)
-sigma,Short-run agglomeration elasticity,0.04,0.008,0.025,0.0538,unitless,Graham & Melo (2009); Bosquet & Overman (2019); Gibbons & Graham (2018)
-beta,Learning/experience agglomeration elasticity,0.04,0.01,0.025,0.04,unitless,D'Costa & Overman (2014); De la Roca & Puga (2017)
-lambda,Land share in rural production,0.18,0.05,0.072,0.1,unitless,Cereal and oilseed production in the United Kingdom 2025; USDA Small Grains 2021 Summary; AHDB
+gamma,Elasticity of commuting cost w.r.t. distance,0.07,0.00,0.05,0.08,unitless,"Combes, Duranton & Gobillon (2019)"
+theta,Population elasticity of congestion (travel speed),0.04,0.00,0.07,0.08,unitless,Gehr & Pflueger (2024)
+sigma,Short-run agglomeration elasticity,0.04,0.00,0.025,0.0538,unitless,Graham & Melo (2009); Bosquet & Overman (2019); Gibbons & Graham (2018)
+beta,Learning/experience agglomeration elasticity,0.04,0.00,0.025,0.04,unitless,D'Costa & Overman (2014); De la Roca & Puga (2017)
+lambda,Land share in rural production,0.18,0.00,0.072,0.1,unitless,Cereal and oilseed production in the United Kingdom 2025; USDA Small Grains 2021 Summary; AHDB
