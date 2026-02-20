@@ -618,10 +618,17 @@ for (cs in names(cities_sets)) {
                     "Change in national income per capita",
                     "national_income_pc")
   
-  create_line_chart(agg_summary, cs, "pct_chg_cons_total",
+  # D&P incumbent-weighted consumption (only incumbents receive c_i)
+  create_line_chart(agg_summary, cs, "pct_chg_cons_incumb",
                     "% change in consumption",
-                    "Change in national consumption per capita",
-                    "national_cons_pc")
+                    "Change in national consumption p.c. (D&P incumbent)",
+                    "national_cons_pc_incumb")
+  
+  # Social planner consumption (all city residents receive c_i)
+  create_line_chart(agg_summary, cs, "pct_chg_cons_social",
+                    "% change in consumption",
+                    "Change in national consumption p.c. (social planner)",
+                    "national_cons_pc_social")
   
   create_city_line_chart(city_income_summary, cs, "pct_chg_y",
                          "% change in income per capita",
@@ -649,10 +656,17 @@ create_all_sets_chart(agg_summary, "pct_chg_national_income_pc",
                       "Change in national income per capita",
                       "national_income_pc")
 
-create_all_sets_chart(agg_summary, "pct_chg_cons_total",
+# D&P incumbent-weighted consumption
+create_all_sets_chart(agg_summary, "pct_chg_cons_incumb",
                       "% change in consumption",
-                      "Change in national consumption per capita",
-                      "national_cons_pc")
+                      "Change in national consumption p.c. (D&P incumbent)",
+                      "national_cons_pc_incumb")
+
+# Social planner consumption
+create_all_sets_chart(agg_summary, "pct_chg_cons_social",
+                      "% change in consumption",
+                      "Change in national consumption p.c. (social planner)",
+                      "national_cons_pc_social")
 
 message("\n=== ALL CHARTS GENERATED ===\n")
 

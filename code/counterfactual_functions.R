@@ -262,27 +262,53 @@ compute_welfare_metrics <- function(marg_result, cf_prep) {
   c_21_rur_cf <- marg_result$c_21_rur_counterfact
   pop_21_rur_cf <- marg_result$pop_21_rur_counterfact
 
+  # --- Income: weighted by full city population (same for both metrics) ---
   y_21_baseline <- sum(final_data$y_21 * (final_data$bua_21_pop / pop_totals$tot_21), na.rm = TRUE) +
     rur_21_income * (pop_totals$rur_21 / pop_totals$tot_21)
-
-  c_21_baseline <- sum(final_data$c_21 * (final_data$pop_21_incumb / pop_totals$tot_21), na.rm = TRUE) +
-    rur_21_income * (rur_21_pop_incumb / pop_totals$tot_21)
 
   y_21_cf <- sum(final_data$y_21_cf * (final_data$pop_21_cf / pop_totals$tot_21), na.rm = TRUE) +
     c_21_rur_cf * (pop_21_rur_cf / pop_totals$tot_21)
 
+  # --- D&P incumbent-weighted consumption (eq 22 for incumbents, c_r for newcomers) ---
+  # Only min(N_01, N_21) residents per city receive c_i; the rest get c_r.
+  # This is D&P's measure: it captures what incumbents actually experience in the
+  # decentralised equilibrium where permitting costs extract the surplus from newcomers.
+  c_21_incumb_baseline <- sum(final_data$c_21 * (final_data$pop_21_incumb / pop_totals$tot_21), na.rm = TRUE) +
+    rur_21_income * (rur_21_pop_incumb / pop_totals$tot_21)
+
   pop_21_rur_incumb_cf <- pop_totals$tot_21 - sum(final_data$pop_21_incumb_counterfact, na.rm = TRUE)
 
-  c_21_cf <- sum(final_data$c_21_cf * (final_data$pop_21_incumb_counterfact / pop_totals$tot_21), na.rm = TRUE) +
+  c_21_incumb_cf <- sum(final_data$c_21_cf * (final_data$pop_21_incumb_counterfact / pop_totals$tot_21), na.rm = TRUE) +
     c_21_rur_cf * (pop_21_rur_incumb_cf / pop_totals$tot_21)
 
+  # --- Social planner consumption (all city residents receive c_i) ---
+  # Every resident of city i contributes c_i to aggregate welfare, because the
+  # permitting cost p_i = c_i - c_r is a transfer, not a real resource cost.
+  # This is the Kaldor-Hicks efficient measure: total real output net of real
+  # resource costs (commuting, congestion, housing), ignoring distributional wedges.
+  c_21_social_baseline <- sum(final_data$c_21 * (final_data$bua_21_pop / pop_totals$tot_21), na.rm = TRUE) +
+    rur_21_income * (pop_totals$rur_21 / pop_totals$tot_21)
+
+  c_21_social_cf <- sum(final_data$c_21_cf * (final_data$pop_21_cf / pop_totals$tot_21), na.rm = TRUE) +
+    c_21_rur_cf * (pop_21_rur_cf / pop_totals$tot_21)
+
   list(
+    # Income (same weighting for both metrics)
     y_21_baseline = y_21_baseline,
-    c_21_baseline = c_21_baseline,
     y_21_counterfactual = y_21_cf,
-    c_21_counterfactual = c_21_cf,
     pct_chg_y_tot = 100 * (y_21_cf - y_21_baseline) / y_21_baseline,
-    pct_chg_c_tot = 100 * (c_21_cf - c_21_baseline) / c_21_baseline,
+
+    # D&P incumbent-weighted consumption
+    c_21_incumb_baseline = c_21_incumb_baseline,
+    c_21_incumb_counterfactual = c_21_incumb_cf,
+    pct_chg_c_incumb = 100 * (c_21_incumb_cf - c_21_incumb_baseline) / c_21_incumb_baseline,
+
+    # Social planner consumption
+    c_21_social_baseline = c_21_social_baseline,
+    c_21_social_counterfactual = c_21_social_cf,
+    pct_chg_c_social = 100 * (c_21_social_cf - c_21_social_baseline) / c_21_social_baseline,
+
+    # Newcomer / rural metrics (unchanged)
     pct_chg_c_rur = 100 * (c_21_rur_cf - rur_21_income) / rur_21_income,
     pct_chg_pop_rur = 100 * (pop_21_rur_cf - pop_totals$rur_21) / pop_totals$rur_21,
     c_21_rur_counterfact = c_21_rur_cf,
@@ -337,7 +363,8 @@ run_sweep <- function(city_set_name, cities_in_cf, rate_sequence,
     agg_results[[r]] <- data.frame(
       target_rate = target_rate,
       pct_chg_newcomer_cons = result$welfare$pct_chg_c_rur,
-      pct_chg_cons_total = result$welfare$pct_chg_c_tot,
+      pct_chg_cons_incumb = result$welfare$pct_chg_c_incumb,
+      pct_chg_cons_social = result$welfare$pct_chg_c_social,
       pct_chg_national_income_pc = result$welfare$pct_chg_y_tot,
       pct_chg_city_income_pc = pct_chg_y_cities
     )

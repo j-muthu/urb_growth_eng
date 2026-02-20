@@ -57,9 +57,13 @@ fluidPage(
                  br(),
                  plotlyOutput("plot_national_income", height = "550px")),
 
-        tabPanel("National Consumption",
+        tabPanel("D&P Incumbent Consumption",
                  br(),
                  plotlyOutput("plot_incumbent_cons", height = "550px")),
+
+        tabPanel("Social Planner Consumption",
+                 br(),
+                 plotlyOutput("plot_social_cons", height = "550px")),
 
         tabPanel("Newcomer Consumption",
                  br(),
