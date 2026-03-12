@@ -188,7 +188,7 @@ function(input, output, session) {
   output$plot_newcomer_cons <- renderPlotly({
     render_agg_chart("pct_chg_newcomer_cons",
                      "% change in consumption",
-                     "Change in newcomer consumption")
+                     "Change in newcomer and rural consumption")
   })
 
   output$plot_national_income <- renderPlotly({

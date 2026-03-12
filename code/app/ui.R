@@ -65,7 +65,7 @@ fluidPage(
                  br(),
                  plotlyOutput("plot_incumbent_cons", height = "550px")),
 
-        tabPanel("Newcomer Consumption",
+        tabPanel("Newcomer and Rural Consumption",
                  br(),
                  plotlyOutput("plot_newcomer_cons", height = "550px")),
 
