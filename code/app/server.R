@@ -200,7 +200,7 @@ function(input, output, session) {
   output$plot_incumbent_cons <- renderPlotly({
     render_agg_chart("pct_chg_cons_incumb",
                      "% change in consumption",
-                     "Change in D&P incumbent consumption per capita")
+                     "Change in incumbent-weighted consumption per capita")
   })
 
   output$plot_social_cons <- renderPlotly({
