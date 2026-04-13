@@ -113,20 +113,28 @@ function refShapes(refRates) {
 
 function baseLayout(title, ylabel, refRates, params) {
   return {
-    title: {text: title + '<br><span style="font-size:11px;color:gray">' + paramCaption(params) + '</span>'},
+    title: {text: title + '<br><span style="font-size:11px;color:gray">' + paramCaption(params) + '</span>', font: {color: '#0a4938'}},
     xaxis: {
-      title: 'Counterfactual permitting rate',
+      title: {text: 'Counterfactual permitting rate', font: {color: '#888'}},
       dtick: 0.02,
       tickformat: '.2f',
+      tickfont: {color: '#888'},
+      gridcolor: '#e8e4d4',
     },
-    yaxis: {title: ylabel},
+    yaxis: {
+      title: {text: ylabel, font: {color: '#888'}},
+      tickfont: {color: '#888'},
+      gridcolor: '#e8e4d4',
+    },
     hovermode: 'x unified',
+    plot_bgcolor: '#fdf9e8',
+    paper_bgcolor: '#fdf9e8',
     shapes: [
-      {type:'line', x0:0, x1:1, xref:'paper', y0:0, y1:0, line:{color:'gray',width:1}},
+      {type:'line', x0:0, x1:1, xref:'paper', y0:0, y1:0, line:{color:'#aaa',width:1}},
       ...refShapes(refRates),
     ],
     annotations: refAnnotations(refRates),
-    legend: {orientation: 'v', x: 1.02, y: 1},
+    legend: {orientation: 'v', x: 1.02, y: 1, font: {color: '#888'}},
     margin: {t: 80, r: 160},
   };
 }
