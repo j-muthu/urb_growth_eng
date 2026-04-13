@@ -83,11 +83,11 @@ header h1 {
   text-align: right;
   font-size: 0.82rem;
   font-family: monospace;
-  color: #495057;
-  border: 1px solid #ced4da;
+  color: #888;
+  border: 1px solid #0a4938;
   border-radius: 3px;
   padding: 2px 4px;
-  background: #fff;
+  background: #fdf9e8;
   -moz-appearance: textfield;
 }
 
