@@ -1,8 +1,17 @@
 # UK Urban Growth Counterfactual Analysis
 
+<https://urban-growth-england.vercel.app/>
+
 An interactive app that estimates the economic effects of relaxing planning regulations in English cities. It applies the spatial equilibrium framework of [Duranton & Puga (2023)](https://onlinelibrary.wiley.com/doi/full/10.3982/ECTA17936) to UK data.
 
 Users can adjust model parameters, select which cities to deregulate, and explore how counterfactual permitting rates affect national income, city-level income, and consumption for both incumbents and newcomers.
+
+The report accompanying this app is [here](https://docs.google.com/document/d/1zuIeKMcHcSlznME1YuhwPnIsAvnqQGujPdDZ_8Un3dU/edit?usp=sharing). It details the:
+- Model
+- Methodology
+- Results
+- Assumptions & limitations
+- Parameter estimates
 
 ## Deployments
 
