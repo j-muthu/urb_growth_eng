@@ -3,7 +3,7 @@
 #===============================================================================
 
 fluidPage(
-  titlePanel("What if England's Planning Regulation was Relaxed?"),
+  titlePanel("What if England's Planning Regulation were Relaxed?"),
 
   sidebarLayout(
     sidebarPanel(
