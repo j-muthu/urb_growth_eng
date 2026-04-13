@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>What if England's Planning Regulation was Relaxed?</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>What if England's Planning Regulation was Relaxed?</h1>
+</header>
+
+<div class="app-container">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <label for="city-set">City set</label>
+    <select id="city-set">
+      <option value="all" selected>All city sets</option>
+      <option value="london_only">London only</option>
+      <option value="top_4">4 largest cities (London, Birmingham, Leeds, Liverpool)</option>
+      <option value="top_6">6 largest cities (London - Manchester)</option>
+      <option value="university_cities">University cities (London, Oxford, Cambridge)</option>
+      <option value="top_10">10 largest cities (London - Bradford)</option>
+    </select>
+
+    <hr>
+    <h3>Model Parameters</h3>
+
+    <div class="slider-group">
+      <label for="gamma">&gamma; (commuting cost elasticity)</label>
+      <input type="range" id="gamma" min="0" max="0.08" step="0.001" value="0.05">
+      <span class="slider-value" id="gamma-val">0.050</span>
+    </div>
+
+    <div class="slider-group">
+      <label for="theta">&theta; (congestion elasticity)</label>
+      <input type="range" id="theta" min="0" max="0.08" step="0.001" value="0.07">
+      <span class="slider-value" id="theta-val">0.070</span>
+    </div>
+
+    <div class="slider-group">
+      <label for="sigma">&sigma; (short-run agglomeration)</label>
+      <input type="range" id="sigma" min="0" max="0.0538" step="0.001" value="0.025">
+      <span class="slider-value" id="sigma-val">0.025</span>
+    </div>
+
+    <div class="slider-group">
+      <label for="beta">&beta; (learning agglomeration)</label>
+      <input type="range" id="beta" min="0" max="0.04" step="0.001" value="0.025">
+      <span class="slider-value" id="beta-val">0.025</span>
+    </div>
+
+    <div class="slider-group">
+      <label for="lambda">&lambda; (land share in rural prod.)</label>
+      <input type="range" id="lambda" min="0" max="0.1" step="0.001" value="0.072">
+      <span class="slider-value" id="lambda-val">0.072</span>
+    </div>
+
+    <hr>
+    <button id="reset-btn" class="btn btn-default">Reset to Central Estimates</button>
+    <button id="run-btn" class="btn btn-primary">Run Counterfactual</button>
+  </aside>
+
+  <!-- Main Panel -->
+  <main class="main-panel">
+    <div class="tabs">
+      <button class="tab active" data-tab="national-income">National Income</button>
+      <button class="tab" data-tab="social-cons">Consumption (Population-Weighted)</button>
+      <button class="tab" data-tab="incumbent-cons">Consumption (Incumbent-Weighted)</button>
+      <button class="tab" data-tab="newcomer-cons">Newcomer and Rural Consumption</button>
+      <button class="tab" data-tab="city-income">City Income</button>
+      <button class="tab" data-tab="city-cons">City Consumption</button>
+    </div>
+
+    <div class="tab-content active" id="national-income">
+      <div id="chart-national-income" class="chart-container"></div>
+    </div>
+    <div class="tab-content" id="social-cons">
+      <div id="chart-social-cons" class="chart-container"></div>
+    </div>
+    <div class="tab-content" id="incumbent-cons">
+      <div id="chart-incumbent-cons" class="chart-container"></div>
+    </div>
+    <div class="tab-content" id="newcomer-cons">
+      <div id="chart-newcomer-cons" class="chart-container"></div>
+    </div>
+    <div class="tab-content" id="city-income">
+      <div id="city-income-subtabs"></div>
+      <div id="chart-city-income" class="chart-container"></div>
+    </div>
+    <div class="tab-content" id="city-cons">
+      <div id="city-cons-subtabs"></div>
+      <div id="chart-city-cons" class="chart-container"></div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loading" class="loading-overlay" style="display:none;">
+      <div class="spinner"></div>
+      <p>Running counterfactual sweep...</p>
+    </div>
+  </main>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,7 +1,11 @@
-code/Outputs/*
+R/Outputs/*
 .claude
 todo.txt
 .R*
 **/.R*
 wrluri/*.csv
 wrluri/*.dta
+__pycache__/
+**/__pycache__/
+*.pyc
+.vercel/
