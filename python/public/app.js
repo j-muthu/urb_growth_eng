@@ -21,9 +21,22 @@ const PARAMS = ['gamma','theta','sigma','beta','lambda'];
 
 PARAMS.forEach(p => {
   const slider = document.getElementById(p);
-  const display = document.getElementById(p + '-val');
+  const numInput = document.getElementById(p + '-val');
+
+  // Slider -> number input
   slider.addEventListener('input', () => {
-    display.textContent = parseFloat(slider.value).toFixed(3);
+    numInput.value = parseFloat(slider.value).toFixed(3);
+  });
+
+  // Number input -> slider (clamped to bounds)
+  numInput.addEventListener('change', () => {
+    const min = parseFloat(slider.min);
+    const max = parseFloat(slider.max);
+    let val = parseFloat(numInput.value);
+    if (isNaN(val)) val = CENTRAL[p];
+    val = Math.min(max, Math.max(min, val));
+    numInput.value = val.toFixed(3);
+    slider.value = val;
   });
 });
 
@@ -31,7 +44,7 @@ document.getElementById('reset-btn').addEventListener('click', () => {
   PARAMS.forEach(p => {
     const slider = document.getElementById(p);
     slider.value = CENTRAL[p];
-    document.getElementById(p + '-val').textContent = CENTRAL[p].toFixed(3);
+    document.getElementById(p + '-val').value = CENTRAL[p].toFixed(3);
   });
 });
 

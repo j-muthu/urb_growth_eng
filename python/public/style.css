@@ -69,17 +69,28 @@ header h1 {
 }
 
 .slider-group input[type="range"] {
-  width: calc(100% - 50px);
+  width: calc(100% - 66px);
   vertical-align: middle;
 }
 
 .slider-value {
   display: inline-block;
-  width: 44px;
+  width: 58px;
   text-align: right;
   font-size: 0.82rem;
   font-family: monospace;
   color: #495057;
+  border: 1px solid #ced4da;
+  border-radius: 3px;
+  padding: 2px 4px;
+  background: #fff;
+  -moz-appearance: textfield;
+}
+
+.slider-value::-webkit-outer-spin-button,
+.slider-value::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .btn {
