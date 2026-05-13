@@ -131,6 +131,7 @@ function baseLayout(title, ylabel, refRates, params) {
       title: 'Counterfactual permitting rate',
       dtick: 0.02,
       tickformat: '.2f',
+      hoverformat: '.3f',
     },
     yaxis: {title: ylabel},
     hovermode: 'x unified',
