@@ -119,6 +119,25 @@ header h1 {
 
 .btn-primary:hover { background: #0b5ed7; }
 
+.repo-link {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid #dee2e6;
+  width: 100%;
+  color: #6c757d;
+  text-decoration: none;
+}
+
+.repo-link svg {
+  display: block;
+}
+
+.repo-link:hover {
+  color: #333;
+}
+
 /* Main panel */
 .main-panel {
   flex: 1;
