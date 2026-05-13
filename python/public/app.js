@@ -2,6 +2,7 @@
 // State
 // ---------------------------------------------------------------------------
 let currentData = null;
+let staticDataCache = null;  // /default_data.json, fetched once per session
 
 const CENTRAL = {gamma: 0.05, theta: 0.07, sigma: 0.025, beta: 0.025, lambda: 0.072};
 
@@ -68,14 +69,44 @@ document.querySelectorAll('.tab').forEach(btn => {
 // ---------------------------------------------------------------------------
 document.getElementById('run-btn').addEventListener('click', runComputation);
 
+function isCentral(params) {
+  return PARAMS.every(p => Math.abs(params[p] - CENTRAL[p]) < 1e-9);
+}
+
+function filterByCitySet(data, citySet) {
+  return {
+    ...data,
+    agg: data.agg.filter(r => r.city_set === citySet),
+    city_income: data.city_income.filter(r => r.city_set === citySet),
+    city_cons: data.city_cons.filter(r => r.city_set === citySet),
+    city_set: citySet,
+  };
+}
+
 async function runComputation() {
   const params = {};
   PARAMS.forEach(p => { params[p] = parseFloat(document.getElementById(p).value); });
-  params.city_set = document.getElementById('city-set').value;
+  const citySet = document.getElementById('city-set').value;
+  params.city_set = citySet;
 
   document.getElementById('loading').style.display = 'flex';
 
   try {
+    // Fast path: central params -> static JSON (no Python boot)
+    if (isCentral(params)) {
+      if (!staticDataCache) {
+        const resp = await fetch('/default_data.json');
+        if (!resp.ok) throw new Error('Failed to load default_data.json');
+        staticDataCache = await resp.json();
+      }
+      currentData = (citySet === 'all')
+        ? {...staticDataCache, city_set: 'all'}
+        : filterByCitySet(staticDataCache, citySet);
+      renderAll(currentData);
+      return;
+    }
+
+    // Custom params: hit the API
     const resp = await fetch('/api/compute', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
