@@ -14,23 +14,32 @@ from lib.data import (
     reference_rates,
     param_ranges,
     PARAMS_CENTRAL,
+    DEFAULT_RESULTS,
 )
 from lib.model import run_sweep
 from lib.constants import CITY_SET_LABELS
 
 
+def _is_central(params):
+    return all(abs(params[k] - PARAMS_CENTRAL[k]) < 1e-9 for k in PARAMS_CENTRAL)
+
+
 def _run(params, city_set_key):
     sets_to_run = list(cities_sets.keys()) if city_set_key == "all" else [city_set_key]
 
-    all_agg = []
-    all_city_income = []
-    all_city_cons = []
-
-    for cs in sets_to_run:
-        result = run_sweep(cs, cities_sets[cs], rate_sequence, pop_totals, params, city_data)
-        all_agg.append(result["agg"])
-        all_city_income.append(result["city_income"])
-        all_city_cons.append(result["city_cons"])
+    if _is_central(params):
+        all_agg = [DEFAULT_RESULTS[cs]["agg"] for cs in sets_to_run]
+        all_city_income = [DEFAULT_RESULTS[cs]["city_income"] for cs in sets_to_run]
+        all_city_cons = [DEFAULT_RESULTS[cs]["city_cons"] for cs in sets_to_run]
+    else:
+        all_agg = []
+        all_city_income = []
+        all_city_cons = []
+        for cs in sets_to_run:
+            result = run_sweep(cs, cities_sets[cs], rate_sequence, pop_totals, params, city_data)
+            all_agg.append(result["agg"])
+            all_city_income.append(result["city_income"])
+            all_city_cons.append(result["city_cons"])
 
     import pandas as pd
 

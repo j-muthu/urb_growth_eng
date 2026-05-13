@@ -72,3 +72,14 @@ rate_start = math.floor((pct_75 - 0.01) * 100) / 100
 rate_end = math.ceil((austin_rate + 0.005) * 100) / 100
 rate_sequence = np.arange(rate_start, rate_end + 0.0005, 0.001)
 rate_sequence = np.round(rate_sequence, 3)
+
+# ---------------------------------------------------------------------------
+# Pre-compute results for central parameters (runs once per cold start).
+# Mirrors R's global.R: server.R short-circuits to these when params match.
+# ---------------------------------------------------------------------------
+from .model import run_sweep  # noqa: E402  (deferred to avoid hot-path cost on import order)
+
+DEFAULT_RESULTS = {
+    cs_name: run_sweep(cs_name, cs_cities, rate_sequence, pop_totals, PARAMS_CENTRAL, city_data)
+    for cs_name, cs_cities in cities_sets.items()
+}
