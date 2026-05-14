@@ -65,6 +65,20 @@ document.querySelectorAll('.tab').forEach(btn => {
 });
 
 // ---------------------------------------------------------------------------
+// Sidebar collapse toggle
+// ---------------------------------------------------------------------------
+document.getElementById('sidebar-toggle').addEventListener('click', () => {
+  const container = document.querySelector('.app-container');
+  const btn = document.getElementById('sidebar-toggle');
+  const collapsed = container.classList.toggle('sidebar-collapsed');
+  btn.innerHTML = collapsed ? '&raquo;' : '&laquo;';
+  btn.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+
+  // Re-render so Plotly fits the new width
+  if (currentData) renderAll(currentData);
+});
+
+// ---------------------------------------------------------------------------
 // Run button
 // ---------------------------------------------------------------------------
 document.getElementById('run-btn').addEventListener('click', runComputation);
@@ -79,6 +93,7 @@ function filterByCitySet(data, citySet) {
     agg: data.agg.filter(r => r.city_set === citySet),
     city_income: data.city_income.filter(r => r.city_set === citySet),
     city_cons: data.city_cons.filter(r => r.city_set === citySet),
+    city_pop: data.city_pop.filter(r => r.city_set === citySet),
     city_set: citySet,
   };
 }
@@ -171,8 +186,8 @@ function baseLayout(title, ylabel, refRates, params) {
       ...refShapes(refRates),
     ],
     annotations: refAnnotations(refRates),
-    legend: {orientation: 'v', x: 1.02, y: 1},
-    margin: {t: 80, r: 160},
+    legend: {orientation: 'h', x: 0.5, xanchor: 'center', y: -0.18, yanchor: 'top'},
+    margin: {t: 80, r: 30, b: 110},
   };
 }
 
@@ -246,11 +261,66 @@ function renderCityChart(containerId, rows, citySetName, yVar, ylabel, titleMetr
   Plotly.newPlot(containerId, traces, baseLayout(title, ylabel, refs, data.params), {responsive: true});
 }
 
+// --- City-level population chart (per-city + aggregate "other" lines) ---
+
+function fmtDelta(n) {
+  return (n >= 0 ? '+' : '-') + Math.round(Math.abs(n)).toLocaleString('en-GB');
+}
+
+function renderCityPopChart(containerId, rows, citySetName, yVar, ylabel, titleMetric, data) {
+  const refs = data.reference_rates;
+  const labels = data.city_set_labels;
+
+  const cityRows = rows.filter(r => r.city_set === citySetName);
+  const cityPops = {};
+  cityRows.forEach(r => { cityPops[r.BUA22NM] = r.bua_21_pop; });
+  const cityOrder = Object.keys(cityPops).sort((a, b) => cityPops[b] - cityPops[a]);
+
+  const traces = cityOrder.map((city, i) => {
+    const cr = cityRows.filter(r => r.BUA22NM === city);
+    const displayName = city.replace('Cambridge (Cambridge)', 'Cambridge');
+    return {
+      x: cr.map(r => r.target_rate),
+      y: cr.map(r => r.pct_chg_pop),
+      customdata: cr.map(r => fmtDelta(r.pop_delta)),
+      name: displayName,
+      mode: 'lines',
+      line: {color: PALETTE[i % PALETTE.length], width: 2},
+      hovertemplate: displayName + ': %{y:.2f}% (%{customdata})',
+    };
+  });
+
+  // Aggregate comparison lines from agg, filtered to this city set
+  const aggRows = data.agg.filter(r => r.city_set === citySetName);
+  traces.push({
+    x: aggRows.map(r => r.target_rate),
+    y: aggRows.map(r => r.pct_chg_pop_other_cities),
+    customdata: aggRows.map(r => fmtDelta(r.pop_delta_other_cities)),
+    name: 'Other (non-affected) cities',
+    mode: 'lines',
+    line: {color: '#000000', width: 2.5},
+    hovertemplate: 'Other cities: %{y:.2f}% (%{customdata})',
+  });
+  traces.push({
+    x: aggRows.map(r => r.target_rate),
+    y: aggRows.map(r => r.pct_chg_pop_rural),
+    customdata: aggRows.map(r => fmtDelta(r.pop_delta_rural)),
+    name: 'Rural areas',
+    mode: 'lines',
+    line: {color: '#6c757d', width: 2.5, dash: 'dash'},
+    hovertemplate: 'Rural areas: %{y:.2f}% (%{customdata})',
+  });
+
+  const title = titleMetric + ': ' + (labels[citySetName] || citySetName);
+  Plotly.newPlot(containerId, traces, baseLayout(title, ylabel, refs, data.params), {responsive: true});
+}
+
 // --- Sub-tabs for city-level when "all" ---
 
-function buildSubtabs(containerEl, chartElId, dataKey, yVar, ylabel, titleMetric, data) {
+function buildSubtabs(containerEl, chartElId, dataKey, yVar, ylabel, titleMetric, data, renderFn) {
   const labels = data.city_set_labels;
   const citySet = data.city_set;
+  const render = renderFn || renderCityChart;
 
   containerEl.innerHTML = '';
   const chartEl = document.getElementById(chartElId);
@@ -264,14 +334,14 @@ function buildSubtabs(containerEl, chartElId, dataKey, yVar, ylabel, titleMetric
       btn.addEventListener('click', () => {
         containerEl.querySelectorAll('.subtab').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        renderCityChart(chartElId, data[dataKey], cs, yVar, ylabel, titleMetric, data);
+        render(chartElId, data[dataKey], cs, yVar, ylabel, titleMetric, data);
       });
       containerEl.appendChild(btn);
     });
     // Render first city set by default
-    renderCityChart(chartElId, data[dataKey], CITY_SET_ORDER[0], yVar, ylabel, titleMetric, data);
+    render(chartElId, data[dataKey], CITY_SET_ORDER[0], yVar, ylabel, titleMetric, data);
   } else {
-    renderCityChart(chartElId, data[dataKey], citySet, yVar, ylabel, titleMetric, data);
+    render(chartElId, data[dataKey], citySet, yVar, ylabel, titleMetric, data);
   }
 }
 
@@ -300,6 +370,12 @@ function renderAll(data) {
     document.getElementById('city-cons-subtabs'), 'chart-city-cons',
     'city_cons', 'pct_chg_c', '% change in consumption',
     'Change in incumbent consumption by city', data
+  );
+
+  buildSubtabs(
+    document.getElementById('city-pop-subtabs'), 'chart-city-pop',
+    'city_pop', 'pct_chg_pop', '% change in population',
+    'Population change by city', data, renderCityPopChart
   );
 }
 

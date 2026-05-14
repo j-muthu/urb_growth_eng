@@ -32,6 +32,44 @@ header h1 {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  position: relative;
+  transition: width 0.2s ease, min-width 0.2s ease, padding 0.2s ease;
+}
+
+.sidebar-toggle {
+  align-self: flex-end;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 8px;
+  padding: 0;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  background: #fff;
+  color: #6c757d;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.app-container.sidebar-collapsed .sidebar {
+  width: 44px;
+  min-width: 44px;
+  padding: 12px 8px;
+  overflow: visible;
+}
+
+.app-container.sidebar-collapsed .sidebar > *:not(.sidebar-toggle) {
+  display: none;
+}
+
+.app-container.sidebar-collapsed .sidebar-toggle {
+  align-self: center;
 }
 
 .sidebar label {
@@ -191,6 +229,54 @@ header h1 {
 .chart-container {
   width: 100%;
   height: 550px;
+}
+
+/* X-axis caption with info tooltip */
+.axis-caption {
+  text-align: center;
+  font-size: 0.85rem;
+  color: #495057;
+  margin-top: 12px;
+}
+
+.help-link {
+  position: relative;
+  color: #6c757d;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.help-link:hover,
+.help-link:focus {
+  color: #333;
+  outline: none;
+}
+
+.tooltip-text {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  bottom: 130%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 240px;
+  background: #333;
+  color: #fff;
+  text-align: left;
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.4;
+  padding: 8px 10px;
+  border-radius: 5px;
+  z-index: 200;
+  transition: opacity 0.12s ease;
+}
+
+.help-link:hover .tooltip-text,
+.help-link:focus .tooltip-text {
+  visibility: visible;
+  opacity: 1;
 }
 
 /* Sub-tabs for city-level charts */

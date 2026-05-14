@@ -17,6 +17,7 @@
 
   <!-- Sidebar -->
   <aside class="sidebar">
+    <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar" title="Collapse sidebar">&laquo;</button>
     <label for="city-set">City set</label>
     <select id="city-set">
       <option value="all" selected>All city sets</option>
@@ -78,29 +79,55 @@
       <button class="tab" data-tab="social-cons">Consumption (Population-Weighted)</button>
       <button class="tab" data-tab="incumbent-cons">Consumption (Incumbent-Weighted)</button>
       <button class="tab" data-tab="newcomer-cons">Newcomer and Rural Consumption</button>
+      <button class="tab" data-tab="city-pop">City Population</button>
       <button class="tab" data-tab="city-income">City Income</button>
       <button class="tab" data-tab="city-cons">City Consumption</button>
     </div>
 
     <div class="tab-content active" id="national-income">
       <div id="chart-national-income" class="chart-container"></div>
+      <div class="axis-caption">
+        <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+      </div>
     </div>
     <div class="tab-content" id="social-cons">
       <div id="chart-social-cons" class="chart-container"></div>
+      <div class="axis-caption">
+        <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+      </div>
     </div>
     <div class="tab-content" id="incumbent-cons">
       <div id="chart-incumbent-cons" class="chart-container"></div>
+      <div class="axis-caption">
+        <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+      </div>
     </div>
     <div class="tab-content" id="newcomer-cons">
       <div id="chart-newcomer-cons" class="chart-container"></div>
+      <div class="axis-caption">
+        <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+      </div>
+    </div>
+    <div class="tab-content" id="city-pop">
+      <div id="city-pop-subtabs"></div>
+      <div id="chart-city-pop" class="chart-container"></div>
+      <div class="axis-caption">
+        <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+      </div>
     </div>
     <div class="tab-content" id="city-income">
       <div id="city-income-subtabs"></div>
       <div id="chart-city-income" class="chart-container"></div>
+      <div class="axis-caption">
+        <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+      </div>
     </div>
     <div class="tab-content" id="city-cons">
       <div id="city-cons-subtabs"></div>
       <div id="chart-city-cons" class="chart-container"></div>
+      <div class="axis-caption">
+        <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+      </div>
     </div>
 
     <!-- Loading overlay -->

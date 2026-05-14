@@ -213,6 +213,7 @@ def run_sweep(city_set_name, cities_in_cf, rate_sequence, pop_totals, params, ci
     agg_rows = []
     city_income_rows = []
     city_cons_rows = []
+    city_pop_rows = []
 
     for target_rate in rate_sequence:
         perm_rate_cf = base_rate.copy()
@@ -231,6 +232,26 @@ def run_sweep(city_set_name, cities_in_cf, rate_sequence, pop_totals, params, ci
         else:
             pct_chg_y_cities = float("nan")
 
+        # Aggregate population change for non-affected cities. Cities reclassified
+        # as rural by find_marginal_city have NaN pop_21_cf, so nansum drops them
+        # (their population is then counted in the rural total).
+        non_aff = rd[rd["in_counterfact"] == 0]
+        non_aff_base = non_aff["bua_21_pop"].sum()
+        non_aff_cf = np.nansum(non_aff["pop_21_cf"].values)
+        if non_aff_base > 0:
+            pct_chg_pop_other_cities = 100.0 * (non_aff_cf - non_aff_base) / non_aff_base
+        else:
+            pct_chg_pop_other_cities = float("nan")
+
+        # Absolute population deltas (people moved). Population is conserved, so
+        # rural absorbs whatever leaves the affected + other cities.
+        affected_delta = (
+            treated["pop_21_cf"].sum() - treated["bua_21_pop"].sum()
+            if len(treated) > 0 else 0.0
+        )
+        other_cities_delta = non_aff_cf - non_aff_base
+        rural_delta = -(affected_delta + other_cities_delta)
+
         agg_rows.append({
             "target_rate": float(target_rate),
             "pct_chg_newcomer_cons": w["pct_chg_c_rur"],
@@ -238,6 +259,10 @@ def run_sweep(city_set_name, cities_in_cf, rate_sequence, pop_totals, params, ci
             "pct_chg_cons_social": w["pct_chg_c_social"],
             "pct_chg_national_income_pc": w["pct_chg_y_tot"],
             "pct_chg_city_income_pc": pct_chg_y_cities,
+            "pct_chg_pop_other_cities": pct_chg_pop_other_cities,
+            "pct_chg_pop_rural": w["pct_chg_pop_rur"],
+            "pop_delta_other_cities": float(other_cities_delta),
+            "pop_delta_rural": float(rural_delta),
         })
 
         for _, row in treated.iterrows():
@@ -253,6 +278,13 @@ def run_sweep(city_set_name, cities_in_cf, rate_sequence, pop_totals, params, ci
                 "pct_chg_c": row["pct_chg_c"],
                 "target_rate": float(target_rate),
             })
+            city_pop_rows.append({
+                "BUA22NM": row["BUA22NM"],
+                "bua_21_pop": row["bua_21_pop"],
+                "pct_chg_pop": 100.0 * (row["pop_21_cf"] - row["bua_21_pop"]) / row["bua_21_pop"],
+                "pop_delta": float(row["pop_21_cf"] - row["bua_21_pop"]),
+                "target_rate": float(target_rate),
+            })
 
     agg = pd.DataFrame(agg_rows)
     agg["city_set"] = city_set_name
@@ -260,5 +292,7 @@ def run_sweep(city_set_name, cities_in_cf, rate_sequence, pop_totals, params, ci
     city_income["city_set"] = city_set_name
     city_cons = pd.DataFrame(city_cons_rows)
     city_cons["city_set"] = city_set_name
+    city_pop = pd.DataFrame(city_pop_rows)
+    city_pop["city_set"] = city_set_name
 
-    return {"agg": agg, "city_income": city_income, "city_cons": city_cons}
+    return {"agg": agg, "city_income": city_income, "city_cons": city_cons, "city_pop": city_pop}

@@ -29,11 +29,15 @@ city_income = pd.concat(
 city_cons = pd.concat(
     [DEFAULT_RESULTS[cs]["city_cons"] for cs in cities_sets], ignore_index=True
 )
+city_pop = pd.concat(
+    [DEFAULT_RESULTS[cs]["city_pop"] for cs in cities_sets], ignore_index=True
+)
 
 payload = {
     "agg": agg.to_dict(orient="records"),
     "city_income": city_income.to_dict(orient="records"),
     "city_cons": city_cons.to_dict(orient="records"),
+    "city_pop": city_pop.to_dict(orient="records"),
     "reference_rates": reference_rates.to_dict(orient="records"),
     "params": PARAMS_CENTRAL,
     "city_set": "all",

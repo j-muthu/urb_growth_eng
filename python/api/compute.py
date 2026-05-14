@@ -31,26 +31,31 @@ def _run(params, city_set_key):
         all_agg = [DEFAULT_RESULTS[cs]["agg"] for cs in sets_to_run]
         all_city_income = [DEFAULT_RESULTS[cs]["city_income"] for cs in sets_to_run]
         all_city_cons = [DEFAULT_RESULTS[cs]["city_cons"] for cs in sets_to_run]
+        all_city_pop = [DEFAULT_RESULTS[cs]["city_pop"] for cs in sets_to_run]
     else:
         all_agg = []
         all_city_income = []
         all_city_cons = []
+        all_city_pop = []
         for cs in sets_to_run:
             result = run_sweep(cs, cities_sets[cs], rate_sequence, pop_totals, params, city_data)
             all_agg.append(result["agg"])
             all_city_income.append(result["city_income"])
             all_city_cons.append(result["city_cons"])
+            all_city_pop.append(result["city_pop"])
 
     import pandas as pd
 
     agg = pd.concat(all_agg, ignore_index=True)
     city_income = pd.concat(all_city_income, ignore_index=True)
     city_cons = pd.concat(all_city_cons, ignore_index=True)
+    city_pop = pd.concat(all_city_pop, ignore_index=True)
 
     return {
         "agg": agg.to_dict(orient="records"),
         "city_income": city_income.to_dict(orient="records"),
         "city_cons": city_cons.to_dict(orient="records"),
+        "city_pop": city_pop.to_dict(orient="records"),
         "reference_rates": reference_rates.to_dict(orient="records"),
         "params": params,
         "city_set": city_set_key,
