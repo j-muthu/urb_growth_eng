@@ -239,6 +239,11 @@ header h1 {
   margin-top: 12px;
 }
 
+.caption-above {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
 .help-link {
   position: relative;
   color: #6c757d;
@@ -271,6 +276,10 @@ header h1 {
   border-radius: 5px;
   z-index: 200;
   transition: opacity 0.12s ease;
+}
+
+.tooltip-wide {
+  width: 340px;
 }
 
 .help-link:hover .tooltip-text,
