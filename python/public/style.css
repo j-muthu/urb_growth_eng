@@ -183,7 +183,6 @@ header h1 {
   flex: 1;
   padding: 20px;
   position: relative;
-  overflow: hidden;
 }
 
 /* Tabs */
@@ -229,6 +228,7 @@ header h1 {
 .chart-container {
   width: 100%;
   height: 550px;
+  overflow: hidden;
 }
 
 /* X-axis caption with info tooltip */
@@ -274,8 +274,14 @@ header h1 {
   line-height: 1.4;
   padding: 8px 10px;
   border-radius: 5px;
-  z-index: 200;
+  z-index: 2000;
   transition: opacity 0.12s ease;
+}
+
+/* Captions above a chart sit near the top of the panel, so open downward */
+.caption-above .tooltip-text {
+  bottom: auto;
+  top: 130%;
 }
 
 .tooltip-wide {
