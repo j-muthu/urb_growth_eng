@@ -33,32 +33,32 @@
 
     <div class="slider-group">
       <label for="gamma">&gamma; (commuting cost elasticity)</label>
-      <input type="range" id="gamma" min="0" max="0.08" step="0.001" value="0.05">
-      <input type="number" class="slider-value" id="gamma-val" min="0" max="0.08" step="0.001" value="0.050">
+      <input type="range" id="gamma" min="0" max="0.08" step="0.001" value="0.07">
+      <input type="number" class="slider-value" id="gamma-val" min="0" max="0.08" step="0.001" value="0.070">
     </div>
 
     <div class="slider-group">
       <label for="theta">&theta; (congestion elasticity)</label>
-      <input type="range" id="theta" min="0" max="0.08" step="0.001" value="0.07">
-      <input type="number" class="slider-value" id="theta-val" min="0" max="0.08" step="0.001" value="0.070">
+      <input type="range" id="theta" min="0" max="0.08" step="0.001" value="0.06">
+      <input type="number" class="slider-value" id="theta-val" min="0" max="0.08" step="0.001" value="0.060">
     </div>
 
     <div class="slider-group">
       <label for="sigma">&sigma; (short-run agglomeration)</label>
-      <input type="range" id="sigma" min="0" max="0.0538" step="0.001" value="0.025">
-      <input type="number" class="slider-value" id="sigma-val" min="0" max="0.0538" step="0.001" value="0.025">
+      <input type="range" id="sigma" min="0" max="0.03" step="0.001" value="0.015">
+      <input type="number" class="slider-value" id="sigma-val" min="0" max="0.03" step="0.001" value="0.015">
     </div>
 
     <div class="slider-group">
       <label for="beta">&beta; (learning agglomeration)</label>
-      <input type="range" id="beta" min="0" max="0.04" step="0.001" value="0.025">
-      <input type="number" class="slider-value" id="beta-val" min="0" max="0.04" step="0.001" value="0.025">
+      <input type="range" id="beta" min="0" max="0.06" step="0.001" value="0.035">
+      <input type="number" class="slider-value" id="beta-val" min="0" max="0.06" step="0.001" value="0.035">
     </div>
 
     <div class="slider-group">
       <label for="lambda">&lambda; (land share in rural prod.)</label>
-      <input type="range" id="lambda" min="0" max="0.1" step="0.001" value="0.072">
-      <input type="number" class="slider-value" id="lambda-val" min="0" max="0.1" step="0.001" value="0.072">
+      <input type="range" id="lambda" min="0" max="0.23" step="0.001" value="0.18">
+      <input type="number" class="slider-value" id="lambda-val" min="0" max="0.23" step="0.001" value="0.180">
     </div>
 
     <hr>
@@ -76,8 +76,8 @@
   <main class="main-panel">
     <div class="tabs">
       <button class="tab active" data-tab="national-income">National Income</button>
+      <button class="tab" data-tab="incumbent-cons">Consumption (Incumbent-Weighted, DP)</button>
       <button class="tab" data-tab="social-cons">Consumption (Population-Weighted)</button>
-      <button class="tab" data-tab="incumbent-cons">Consumption (Incumbent-Weighted)</button>
       <button class="tab" data-tab="newcomer-cons">Newcomer and Rural Consumption</button>
       <button class="tab" data-tab="city-pop">City Population</button>
       <button class="tab" data-tab="city-income">City Income</button>
@@ -90,20 +90,20 @@
         <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
       </div>
     </div>
-    <div class="tab-content" id="social-cons">
+    <div class="tab-content" id="incumbent-cons">
       <div class="axis-caption caption-above">
-        <span class="help-link" tabindex="0">What's the difference between population-weighted and incumbent-weighted consumption?<span class="tooltip-text tooltip-wide"><b>Population-weighted consumption</b> measures the full city-level consumption (income minus the costs of living) for all city residents, so it captures the full economic gain when people move to more productive cities. <b>Incumbent-weighted consumption</b> means only originally incumbent residents enjoy city-level consumption, while newcomers receive the rural consumption level. This reflects the fact that newcomers bear the permitting cost of moving into the city, which offsets the consumption gain from moving in.</span></span>
+        <span class="help-link" tabindex="0">What's the difference between population-weighted and incumbent-weighted consumption?<span class="tooltip-text tooltip-wide"><b>Incumbent-weighted consumption</b> is Duranton and Puga's (2023) measure. A city's original residents receive that city's consumption (income minus commuting and housing costs). Newcomers and rural residents receive rural consumption, because the permitting cost newcomers pay absorbs the difference. Duranton and Puga treat that cost as a pure loss (delay, compliance and similar costs), so nobody receives it. <b>Population-weighted consumption</b> credits every city resident with their city's consumption. That is what aggregate consumption would be if permitting costs were instead transfers that stay in the economy, such as land-value gains for owners of land granted permission, or developer contributions. The gap between the two is exactly newcomers' total permitting payments, so they are lower and upper bounds on the aggregate gain.</span></span>
       </div>
-      <div id="chart-social-cons" class="chart-container"></div>
+      <div id="chart-incumbent-cons" class="chart-container"></div>
       <div class="axis-caption">
         <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
       </div>
     </div>
-    <div class="tab-content" id="incumbent-cons">
+    <div class="tab-content" id="social-cons">
       <div class="axis-caption caption-above">
-        <span class="help-link" tabindex="0">What's the difference between population-weighted and incumbent-weighted consumption?<span class="tooltip-text tooltip-wide"><b>Population-weighted consumption</b> measures the full city-level consumption (income minus the costs of living) for all city residents, so it captures the full economic gain when people move to more productive cities. <b>Incumbent-weighted consumption</b> means only originally incumbent residents enjoy city-level consumption, while newcomers receive the rural consumption level. This reflects the fact that newcomers bear the permitting cost of moving into the city, which offsets the consumption gain from moving in.</span></span>
+        <span class="help-link" tabindex="0">What's the difference between population-weighted and incumbent-weighted consumption?<span class="tooltip-text tooltip-wide"><b>Incumbent-weighted consumption</b> is Duranton and Puga's (2023) measure. A city's original residents receive that city's consumption (income minus commuting and housing costs). Newcomers and rural residents receive rural consumption, because the permitting cost newcomers pay absorbs the difference. Duranton and Puga treat that cost as a pure loss (delay, compliance and similar costs), so nobody receives it. <b>Population-weighted consumption</b> credits every city resident with their city's consumption. That is what aggregate consumption would be if permitting costs were instead transfers that stay in the economy, such as land-value gains for owners of land granted permission, or developer contributions. The gap between the two is exactly newcomers' total permitting payments, so they are lower and upper bounds on the aggregate gain.</span></span>
       </div>
-      <div id="chart-incumbent-cons" class="chart-container"></div>
+      <div id="chart-social-cons" class="chart-container"></div>
       <div class="axis-caption">
         <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
       </div>

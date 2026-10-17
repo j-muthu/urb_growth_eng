@@ -31,11 +31,11 @@ SKIP_DATA_CONSTRUCTION <- FALSE
 # Central UK parameter estimates
 # See parameter_estimates.csv for min/max ranges and full sourcing
 PARAMS_CENTRAL <- list(
-  gamma  = 0.05,   # commuting cost elasticity w.r.t. distance
-  theta  = 0.07,   # congestion elasticity w.r.t. city population
-  sigma  = 0.025,  # short-run agglomeration elasticity
-  beta   = 0.025,  # learning/experience agglomeration elasticity
-  lambda = 0.072    # land share in rural production
+  gamma  = 0.07,   # commuting cost elasticity w.r.t. distance
+  theta  = 0.06,   # congestion elasticity w.r.t. city population
+  sigma  = 0.015,  # short-run (static) agglomeration elasticity
+  beta   = 0.035,  # learning/experience agglomeration elasticity
+  lambda = 0.18    # land share in rural production
 )
 
 PERM_DATA_START_ROW <- 33128
@@ -621,13 +621,13 @@ for (cs in names(cities_sets)) {
   # D&P incumbent-weighted consumption (only incumbents receive c_i)
   create_line_chart(agg_summary, cs, "pct_chg_cons_incumb",
                     "% change in consumption",
-                    "Change in national consumption p.c. (D&P incumbent)",
+                    "Change in national consumption p.c. (incumbent-weighted, D&P)",
                     "national_cons_pc_incumb")
   
   # Social planner consumption (all city residents receive c_i)
   create_line_chart(agg_summary, cs, "pct_chg_cons_social",
                     "% change in consumption",
-                    "Change in national consumption p.c. (social planner)",
+                    "Change in national consumption p.c. (population-weighted)",
                     "national_cons_pc_social")
   
   create_city_line_chart(city_income_summary, cs, "pct_chg_y",
@@ -659,13 +659,13 @@ create_all_sets_chart(agg_summary, "pct_chg_national_income_pc",
 # D&P incumbent-weighted consumption
 create_all_sets_chart(agg_summary, "pct_chg_cons_incumb",
                       "% change in consumption",
-                      "Change in national consumption p.c. (D&P incumbent)",
+                      "Change in national consumption p.c. (incumbent-weighted, D&P)",
                       "national_cons_pc_incumb")
 
 # Social planner consumption
 create_all_sets_chart(agg_summary, "pct_chg_cons_social",
                       "% change in consumption",
-                      "Change in national consumption p.c. (social planner)",
+                      "Change in national consumption p.c. (population-weighted)",
                       "national_cons_pc_social")
 
 message("\n=== ALL CHARTS GENERATED ===\n")

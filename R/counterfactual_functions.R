@@ -222,7 +222,10 @@ find_marginal_city <- function(cf_data, cf_prep) {
     rural_pop <- pop_totals$tot_21 - urban_pop
     c_21_rural_threshold <- rur_21_prod * rural_pop^(-params$lambda)
 
-    if (c_21_rural_threshold > sorted_data$c_21_cf[marginal_city_index]) {
+    # Relative tolerance: rural productivity is calibrated so the baseline marginal city ties
+    # exactly with rural consumption; without it, floating-point noise vacates that city even
+    # when no city is treated.
+    if (c_21_rural_threshold > sorted_data$c_21_cf[marginal_city_index] * (1 + 1e-12)) {
       marginal_city_index <- marginal_city_index - 1
     } else {
       break

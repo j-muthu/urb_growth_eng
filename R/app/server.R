@@ -91,6 +91,13 @@ function(input, output, session) {
       lambda = input$lambda
     )
 
+    # Second-order condition: urban costs must rise faster with city size than agglomeration benefits
+    if (params$gamma + params$theta <= params$sigma + params$beta + 1e-9) {
+      showNotification("Invalid parameters: the model requires gamma + theta > sigma + beta.",
+                       type = "error", duration = 8)
+      return()
+    }
+
     # Check if params match central estimates (pre-computed)
     is_central <- all(mapply(
       function(a, b) isTRUE(all.equal(a, b)),
@@ -200,13 +207,13 @@ function(input, output, session) {
   output$plot_incumbent_cons <- renderPlotly({
     render_agg_chart("pct_chg_cons_incumb",
                      "% change in consumption",
-                     "Change in incumbent-weighted consumption per capita")
+                     "Change in incumbent-weighted consumption per capita (Duranton-Puga measure)")
   })
 
   output$plot_social_cons <- renderPlotly({
     render_agg_chart("pct_chg_cons_social",
                      "% change in consumption",
-                     "Change in social planner consumption per capita")
+                     "Change in population-weighted consumption per capita (upper bound)")
   })
 
   #_____________________________________________________________________________

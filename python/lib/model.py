@@ -126,7 +126,10 @@ def find_marginal_city(cf_data, cf_prep):
         urban_pop = cumpop[marginal_city_index]
         rural_pop = pop_totals["tot_21"] - urban_pop
         c_rural_threshold = rur_21_prod * rural_pop ** (-lam)
-        if c_rural_threshold > c_cf[marginal_city_index]:
+        # Relative tolerance: rural productivity is calibrated so the baseline marginal city ties
+        # exactly with rural consumption; without it, floating-point noise vacates that city even
+        # when no city is treated.
+        if c_rural_threshold > c_cf[marginal_city_index] * (1 + 1e-12):
             marginal_city_index -= 1
         else:
             break

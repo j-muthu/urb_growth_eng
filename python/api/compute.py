@@ -82,6 +82,11 @@ class handler(BaseHTTPRequestHandler):
                 val = float(val)
                 params[name] = val
 
+            if params["gamma"] + params["theta"] <= params["sigma"] + params["beta"] + 1e-9:
+                self._error(400, "Invalid parameters: the model requires gamma + theta > sigma + beta "
+                                 "(urban costs must rise faster with city size than agglomeration benefits).")
+                return
+
             result = _run(params, city_set_key)
 
             self.send_response(200)

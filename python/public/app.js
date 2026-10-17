@@ -4,7 +4,7 @@
 let currentData = null;
 let staticDataCache = null;  // /default_data.json, fetched once per session
 
-const CENTRAL = {gamma: 0.05, theta: 0.07, sigma: 0.025, beta: 0.025, lambda: 0.072};
+const CENTRAL = {gamma: 0.07, theta: 0.06, sigma: 0.015, beta: 0.035, lambda: 0.18};
 
 const PALETTE = [
   '#e6194B','#3cb44b','#ffe119','#4363d8','#f58231',
@@ -103,6 +103,13 @@ async function runComputation() {
   PARAMS.forEach(p => { params[p] = parseFloat(document.getElementById(p).value); });
   const citySet = document.getElementById('city-set').value;
   params.city_set = citySet;
+
+  // Second-order condition of the incumbents' problem: urban costs must rise faster than agglomeration benefits
+  if (params.gamma + params.theta <= params.sigma + params.beta + 1e-9) {
+    alert('Invalid parameters: the model requires \u03B3 + \u03B8 > \u03C3 + \u03B2 ' +
+          '(urban costs must rise faster with city size than agglomeration benefits).');
+    return;
+  }
 
   document.getElementById('loading').style.display = 'flex';
 
@@ -352,10 +359,10 @@ function renderAll(data) {
     '% change in income per capita', 'Change in national income per capita');
 
   renderAggChart('chart-social-cons', data, 'pct_chg_cons_social',
-    '% change in consumption', 'Change in social planner consumption per capita');
+    '% change in consumption', 'Change in population-weighted consumption per capita (upper bound)');
 
   renderAggChart('chart-incumbent-cons', data, 'pct_chg_cons_incumb',
-    '% change in consumption', 'Change in incumbent-weighted consumption per capita');
+    '% change in consumption', 'Change in incumbent-weighted consumption per capita (Duranton\u2013Puga measure)');
 
   renderAggChart('chart-newcomer-cons', data, 'pct_chg_newcomer_cons',
     '% change in consumption', 'Change in newcomer and rural consumption');

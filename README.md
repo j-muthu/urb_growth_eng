@@ -26,15 +26,23 @@ Both deployments produce identical results — the Python backend is a direct po
 
 The model calibrates a spatial equilibrium for English cities using 2001 and 2021 Built-Up Area (BUA) population data. For a given set of cities and a target permitting rate, it computes counterfactual populations, finds the new marginal city, and calculates welfare changes relative to the baseline.
 
-Key parameters (with UK-adapted central estimates and ranges):
+Key parameters (UK central estimates and literature ranges; dashboard sliders run from 0 to the top of each range):
 
-| Parameter | Description | Central | Range |
-|-----------|-------------|---------|-------|
-| &gamma; | Elasticity of commuting cost w.r.t. distance | 0.05 | 0.03 -- 0.08 |
-| &theta; | Population elasticity of congestion (travel speed) | 0.07 | 0.05 -- 0.08 |
-| &sigma; | Short-run agglomeration elasticity | 0.025 | 0.008 -- 0.0538 |
-| &beta; | Learning/experience agglomeration elasticity | 0.025 | 0.01 -- 0.04 |
-| &lambda; | Land share in rural production | 0.072 | 0.05 -- 0.10 |
+| Parameter | Description | US (Duranton & Puga) | UK central | UK range | Main sources |
+|-----------|-------------|----------------------|------------|----------|--------------|
+| &gamma; | Elasticity of commuting cost w.r.t. distance | 0.07 | 0.07 | 0.05 -- 0.08 | Duranton & Puga (2023); Gehr & Pfl&uuml;ger (2025) |
+| &theta; | Population elasticity of congestion (travel speed) | 0.04 | 0.06 | 0.04 -- 0.08 | Duranton & Puga (2023); Gehr & Pfl&uuml;ger (2025); Akbar et al. (2023); DfT local A-road speeds (2024) |
+| &sigma; | Short-run (static) agglomeration elasticity | 0.04 | 0.015 | 0.008 -- 0.03 | Bosquet & Overman (2019); Graham & Melo (2009); D'Costa (2024) |
+| &beta; | Learning/experience agglomeration elasticity | 0.04 | 0.035 | 0.015 -- 0.06 | Bosquet & Overman (2019); D'Costa & Overman (2014); De la Roca & Puga (2017) |
+| &lambda; | Land share in rural production | 0.18 | 0.18 | 0.10 -- 0.23 | Valentinyi & Herrendorf (2008); Fuglie (2015); Defra, Agriculture in the UK (2024) |
+
+The model requires &gamma; + &theta; > &sigma; + &beta; (urban costs must rise faster with city size than agglomeration benefits); the dashboard rejects parameter combinations that violate this.
+
+### Consumption measures
+
+- **Incumbent-weighted consumption** is Duranton and Puga's measure. A city's original residents receive that city's consumption; newcomers and rural residents receive rural consumption, because the permitting cost newcomers pay absorbs the difference. Duranton and Puga treat that cost as a pure deadweight loss ("a source of deadweight loss for society", p. 2250), so nobody receives it.
+- **Population-weighted consumption** credits every city resident with their city's consumption. It is what aggregate consumption would be if permitting costs were instead transfers that stay in the economy (for example land-value gains for owners of land granted permission, or developer contributions).
+- The gap between the two is exactly newcomers' total permitting payments divided by population, so the two measures are lower and upper bounds on the aggregate consumption gain.
 
 Reference permitting rates (75th/95th percentile UK cities, UK max, and Austin TX) are shown as dashed vertical lines on each chart.
 
