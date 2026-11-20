@@ -46,6 +46,10 @@ The model requires &gamma; + &theta; > &sigma; + &beta; (urban costs must rise f
 
 Reference permitting rates (the 75th and 95th percentile English cities and the English maximum) are shown as dashed vertical lines on each chart. The permitting rate sweep runs from just below the 75th percentile to just above the English maximum. Austin, Texas's rate (new dwellings permitted per 2001 resident, about 0.25) is computed in `calculate_austin_perm_rate()` for reference only: at more than twice the English maximum it lies outside the range over which observed growth can sensibly be scaled.
 
+### Housing supply measure
+
+By default the counterfactual scales each treated city's 2001-2021 growth by the ratio of the target permitting rate to its observed rate. The dashboard's *Housing supply measure* dropdown switches to census household growth (households in 2021 minus households in 2001, per 2001 household) as a robustness check, as in Section 6.6 of the paper. It is the same counterfactual with this measure in place of the permitting rate. The reference lines are its 75th and 95th percentiles (0.192 and 0.321); its maximum (Ingleby Barwick, 0.63) is a new-build outlier and is not used. The sweep runs from the median (0.13) to 0.36. Central-parameter results for both measures are pre-computed into `public/default_data.json` and `public/default_data_households.json` by `scripts/generate_default_data.py`.
+
 ## Repository structure
 
 ```

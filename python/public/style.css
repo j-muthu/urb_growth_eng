@@ -294,6 +294,20 @@ header h1 {
   opacity: 1;
 }
 
+/* Help text in the sidebar: open downward and left-aligned so the sidebar doesn't clip it */
+.sidebar-help {
+  font-size: 0.8rem;
+  margin: -2px 0 8px;
+}
+
+.sidebar-help .tooltip-text {
+  bottom: auto;
+  top: 130%;
+  left: 0;
+  transform: none;
+  width: 236px;
+}
+
 /* Sub-tabs for city-level charts */
 .subtab {
   padding: 5px 10px;

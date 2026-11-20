@@ -2,7 +2,24 @@
 // State
 // ---------------------------------------------------------------------------
 let currentData = null;
-let staticDataCache = null;  // /default_data.json, fetched once per session
+const staticDataCache = {};  // central-parameter results per measure, fetched once per session
+
+// Static central-parameter results for each housing-supply measure
+const STATIC_FILES = {
+  permits: '/default_data.json',
+  households: '/default_data_households.json',
+};
+
+const RATE_HELP = {
+  permits: {
+    question: 'What is the counterfactual permitting rate?',
+    text: 'A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.',
+  },
+  households: {
+    question: 'What is counterfactual household growth?',
+    text: "The growth in a city's number of households between 2001 and 2021, per 2001 household, under the counterfactual. Each treated city is raised to this value and its population growth is scaled up in proportion. Higher means more homes were allowed.",
+  },
+};
 
 const CENTRAL = {gamma: 0.07, theta: 0.06, sigma: 0.015, beta: 0.035, lambda: 0.18};
 
@@ -103,6 +120,8 @@ async function runComputation() {
   PARAMS.forEach(p => { params[p] = parseFloat(document.getElementById(p).value); });
   const citySet = document.getElementById('city-set').value;
   params.city_set = citySet;
+  const measure = document.getElementById('measure').value;
+  params.measure = measure;
 
   // Second-order condition of the incumbents' problem: urban costs must rise faster than agglomeration benefits
   if (params.gamma + params.theta <= params.sigma + params.beta + 1e-9) {
@@ -116,14 +135,15 @@ async function runComputation() {
   try {
     // Fast path: central params -> static JSON (no Python boot)
     if (isCentral(params)) {
-      if (!staticDataCache) {
-        const resp = await fetch('/default_data.json');
-        if (!resp.ok) throw new Error('Failed to load default_data.json');
-        staticDataCache = await resp.json();
+      if (!staticDataCache[measure]) {
+        const resp = await fetch(STATIC_FILES[measure]);
+        if (!resp.ok) throw new Error('Failed to load ' + STATIC_FILES[measure]);
+        staticDataCache[measure] = await resp.json();
       }
+      const cached = staticDataCache[measure];
       currentData = (citySet === 'all')
-        ? {...staticDataCache, city_set: 'all'}
-        : filterByCitySet(staticDataCache, citySet);
+        ? {...cached, city_set: 'all'}
+        : filterByCitySet(cached, citySet);
       renderAll(currentData);
       return;
     }
@@ -147,10 +167,20 @@ async function runComputation() {
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
-function paramCaption(params) {
-  return `\u03B3=${params.gamma.toFixed(2)}, \u03B8=${params.theta.toFixed(2)}, ` +
-         `\u03C3=${params.sigma.toFixed(3)}, \u03B2=${params.beta.toFixed(3)}, ` +
-         `\u03BB=${params.lambda.toFixed(3)}`;
+function paramCaption(params, measure) {
+  const caption = `\u03B3=${params.gamma.toFixed(2)}, \u03B8=${params.theta.toFixed(2)}, ` +
+                  `\u03C3=${params.sigma.toFixed(3)}, \u03B2=${params.beta.toFixed(3)}, ` +
+                  `\u03BB=${params.lambda.toFixed(3)}`;
+  return measure === 'households'
+    ? caption + ' \u00B7 housing supply measured by census household growth'
+    : caption;
+}
+
+function updateRateHelp(measure) {
+  const help = RATE_HELP[measure] || RATE_HELP.permits;
+  document.querySelectorAll('.rate-help').forEach(el => {
+    el.innerHTML = help.question + '<span class="tooltip-text">' + help.text + '</span>';
+  });
 }
 
 function refAnnotations(refRates) {
@@ -177,12 +207,13 @@ function refShapes(refRates) {
   }));
 }
 
-function baseLayout(title, ylabel, refRates, params) {
+function baseLayout(title, ylabel, refRates, params, data) {
+  const measure = (data && data.measure) || 'permits';
   return {
-    title: {text: title + '<br><span style="font-size:11px;color:gray">' + paramCaption(params) + '</span>'},
+    title: {text: title + '<br><span style="font-size:11px;color:gray">' + paramCaption(params, measure) + '</span>'},
     xaxis: {
-      title: 'Counterfactual permitting rate',
-      dtick: 0.02,
+      title: (data && data.x_label) || 'Counterfactual permitting rate',
+      dtick: (data && data.dtick) || 0.02,
       tickformat: '.2f',
       hoverformat: '.3f',
     },
@@ -236,7 +267,7 @@ function renderAggChart(containerId, data, yVar, ylabel, titleMetric) {
     ? titleMetric
     : titleMetric + ': ' + (labels[citySet] || citySet);
 
-  Plotly.newPlot(containerId, traces, baseLayout(title, ylabel, refs, data.params), {responsive: true});
+  Plotly.newPlot(containerId, traces, baseLayout(title, ylabel, refs, data.params, data), {responsive: true});
 }
 
 // --- City-level chart ---
@@ -265,7 +296,7 @@ function renderCityChart(containerId, rows, citySetName, yVar, ylabel, titleMetr
   });
 
   const title = titleMetric + ': ' + (labels[citySetName] || citySetName);
-  Plotly.newPlot(containerId, traces, baseLayout(title, ylabel, refs, data.params), {responsive: true});
+  Plotly.newPlot(containerId, traces, baseLayout(title, ylabel, refs, data.params, data), {responsive: true});
 }
 
 // --- City-level population chart (per-city + aggregate "other" lines) ---
@@ -319,7 +350,7 @@ function renderCityPopChart(containerId, rows, citySetName, yVar, ylabel, titleM
   });
 
   const title = titleMetric + ': ' + (labels[citySetName] || citySetName);
-  Plotly.newPlot(containerId, traces, baseLayout(title, ylabel, refs, data.params), {responsive: true});
+  Plotly.newPlot(containerId, traces, baseLayout(title, ylabel, refs, data.params, data), {responsive: true});
 }
 
 // --- Sub-tabs for city-level when "all" ---
@@ -355,6 +386,7 @@ function buildSubtabs(containerEl, chartElId, dataKey, yVar, ylabel, titleMetric
 // --- Render all charts ---
 
 function renderAll(data) {
+  updateRateHelp(data.measure || 'permits');
   renderAggChart('chart-national-income', data, 'pct_chg_national_income_pc',
     '% change in income per capita', 'Change in national income per capita');
 

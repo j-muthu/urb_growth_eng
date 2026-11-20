@@ -53,3 +53,39 @@ def test_api_rejects_second_order_condition_violation():
         assert status == 200 and len(body["agg"]) > 0
     finally:
         server.shutdown()
+
+
+def test_household_measure_no_treatment_and_paper_values():
+    """Household-growth robustness check: zero at no treatment, and matches the paper's Table 8."""
+    from lib.data import HH_COL, hh_reference_rates
+
+    for cs, cities in cities_sets.items():
+        row = run_sweep(cs, cities, np.array([0.0]), pop_totals, PARAMS_CENTRAL, city_data,
+                        rate_col=HH_COL)["agg"].iloc[0]
+        assert abs(row["pct_chg_national_income_pc"]) < 1e-10, (cs, row["pct_chg_national_income_pc"])
+
+    rates = hh_reference_rates["rate"].values
+    agg = run_sweep("top_10", cities_sets["top_10"], rates, pop_totals, PARAMS_CENTRAL, city_data,
+                    rate_col=HH_COL)["agg"]
+    assert np.allclose(agg["pct_chg_national_income_pc"].values, [2.3351, 6.8904], atol=1e-3)
+    assert np.allclose(agg["pct_chg_cons_incumb"].values, [0.2708, 0.7161], atol=1e-3)
+
+
+def test_api_household_measure():
+    from api.compute import handler
+
+    server = HTTPServer(("127.0.0.1", 0), handler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, body = _post(port, {**PARAMS_CENTRAL, "beta": 0.03, "city_set": "london_only",
+                                    "measure": "households"})
+        assert status == 200 and body["measure"] == "households"
+        assert [r["label"].split(" (")[0] for r in body["reference_rates"]] == \
+            ["75th percentile", "95th percentile"]
+        assert min(body["rate_sequence"]) > 0.1
+        status, body = _post(port, {**PARAMS_CENTRAL, "city_set": "london_only", "measure": "dwellings"})
+        assert status == 400 and "Unknown measure" in body["error"]
+    finally:
+        server.shutdown()

@@ -9,12 +9,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib.data import (
     city_data,
     cities_sets,
-    rate_sequence,
     pop_totals,
-    reference_rates,
     param_ranges,
     PARAMS_CENTRAL,
-    DEFAULT_RESULTS,
+    MEASURES,
+    default_results,
 )
 from lib.model import run_sweep
 from lib.constants import CITY_SET_LABELS
@@ -24,21 +23,24 @@ def _is_central(params):
     return all(abs(params[k] - PARAMS_CENTRAL[k]) < 1e-9 for k in PARAMS_CENTRAL)
 
 
-def _run(params, city_set_key):
+def _run(params, city_set_key, measure="permits"):
     sets_to_run = list(cities_sets.keys()) if city_set_key == "all" else [city_set_key]
+    m = MEASURES[measure]
 
     if _is_central(params):
-        all_agg = [DEFAULT_RESULTS[cs]["agg"] for cs in sets_to_run]
-        all_city_income = [DEFAULT_RESULTS[cs]["city_income"] for cs in sets_to_run]
-        all_city_cons = [DEFAULT_RESULTS[cs]["city_cons"] for cs in sets_to_run]
-        all_city_pop = [DEFAULT_RESULTS[cs]["city_pop"] for cs in sets_to_run]
+        central = default_results(measure)
+        all_agg = [central[cs]["agg"] for cs in sets_to_run]
+        all_city_income = [central[cs]["city_income"] for cs in sets_to_run]
+        all_city_cons = [central[cs]["city_cons"] for cs in sets_to_run]
+        all_city_pop = [central[cs]["city_pop"] for cs in sets_to_run]
     else:
         all_agg = []
         all_city_income = []
         all_city_cons = []
         all_city_pop = []
         for cs in sets_to_run:
-            result = run_sweep(cs, cities_sets[cs], rate_sequence, pop_totals, params, city_data)
+            result = run_sweep(cs, cities_sets[cs], m["rate_sequence"], pop_totals, params, city_data,
+                               rate_col=m["col"])
             all_agg.append(result["agg"])
             all_city_income.append(result["city_income"])
             all_city_cons.append(result["city_cons"])
@@ -56,11 +58,14 @@ def _run(params, city_set_key):
         "city_income": city_income.to_dict(orient="records"),
         "city_cons": city_cons.to_dict(orient="records"),
         "city_pop": city_pop.to_dict(orient="records"),
-        "reference_rates": reference_rates.to_dict(orient="records"),
+        "reference_rates": m["reference_rates"].to_dict(orient="records"),
         "params": params,
         "city_set": city_set_key,
         "city_set_labels": CITY_SET_LABELS,
-        "rate_sequence": rate_sequence.tolist(),
+        "rate_sequence": m["rate_sequence"].tolist(),
+        "measure": measure,
+        "x_label": m["x_label"],
+        "dtick": m["dtick"],
     }
 
 
@@ -75,6 +80,11 @@ class handler(BaseHTTPRequestHandler):
                 self._error(400, f"Unknown city_set: {city_set_key}")
                 return
 
+            measure = body.get("measure", "permits")
+            if measure not in MEASURES:
+                self._error(400, f"Unknown measure: {measure}")
+                return
+
             params = {}
             for _, row in param_ranges.iterrows():
                 name = row["parameter"]
@@ -87,7 +97,7 @@ class handler(BaseHTTPRequestHandler):
                                  "(urban costs must rise faster with city size than agglomeration benefits).")
                 return
 
-            result = _run(params, city_set_key)
+            result = _run(params, city_set_key, measure)
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

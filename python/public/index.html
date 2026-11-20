@@ -28,6 +28,15 @@
       <option value="top_10">10 largest cities (London - Bradford)</option>
     </select>
 
+    <label for="measure">Housing supply measure</label>
+    <select id="measure">
+      <option value="permits" selected>Planning permissions (default)</option>
+      <option value="households">Household growth (robustness)</option>
+    </select>
+    <div class="sidebar-help">
+      <span class="help-link" tabindex="0">What's the difference?<span class="tooltip-text"><b>Planning permissions</b> (main results): homes granted planning permission in the city's local authority between 2001 and 2021, per 2001 resident. Major applications count as 10 homes, because the statistics record decisions rather than homes.<br><br><b>Census household growth</b>: the change in the number of households between the 2001 and 2021 censuses, per 2001 household. It counts homes that were actually occupied and is measured for each city directly, but it also reflects demand, not just what planning allowed.<br><br>Either way, each treated city's 2001&ndash;2021 growth is scaled by the ratio of the target to its own value. The reference lines are the 75th and 95th percentiles across English cities (and, for permissions, the English maximum).</span></span>
+    </div>
+
     <hr>
     <h3>Model Parameters</h3>
 
@@ -87,7 +96,7 @@
     <div class="tab-content active" id="national-income">
       <div id="chart-national-income" class="chart-container"></div>
       <div class="axis-caption">
-        <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
       </div>
     </div>
     <div class="tab-content" id="incumbent-cons">
@@ -96,7 +105,7 @@
       </div>
       <div id="chart-incumbent-cons" class="chart-container"></div>
       <div class="axis-caption">
-        <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
       </div>
     </div>
     <div class="tab-content" id="social-cons">
@@ -105,34 +114,34 @@
       </div>
       <div id="chart-social-cons" class="chart-container"></div>
       <div class="axis-caption">
-        <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
       </div>
     </div>
     <div class="tab-content" id="newcomer-cons">
       <div id="chart-newcomer-cons" class="chart-container"></div>
       <div class="axis-caption">
-        <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
       </div>
     </div>
     <div class="tab-content" id="city-pop">
       <div id="city-pop-subtabs"></div>
       <div id="chart-city-pop" class="chart-container"></div>
       <div class="axis-caption">
-        <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
       </div>
     </div>
     <div class="tab-content" id="city-income">
       <div id="city-income-subtabs"></div>
       <div id="chart-city-income" class="chart-container"></div>
       <div class="axis-caption">
-        <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
       </div>
     </div>
     <div class="tab-content" id="city-cons">
       <div id="city-cons-subtabs"></div>
       <div id="chart-city-cons" class="chart-container"></div>
       <div class="axis-caption">
-        <span class="help-link" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
       </div>
     </div>
 

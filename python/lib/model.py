@@ -74,12 +74,20 @@ def prepare_counterfactual_data(city_data, cities_in_cf, params, pop_totals):
     }
 
 
-def compute_cf_populations(cf_prep, perm_rate_cf):
+DEFAULT_RATE_COL = "bua_perm_rate_01_21"
+
+
+def compute_cf_populations(cf_prep, perm_rate_cf, rate_col=DEFAULT_RATE_COL):
+    """Scale treated cities' 2001-2021 growth by (counterfactual rate / observed rate).
+
+    rate_col is the housing-supply measure: permits per 2001 resident (default) or
+    census household growth per 2001 household (robustness check).
+    """
     d = cf_prep["data"].copy()
     d["perm_rate_counterfact"] = perm_rate_cf
     d["bua_21_pop_counterfact"] = d["bua_21_pop"].values.astype(float).copy()
     mask = d["in_counterfact"].values == 1
-    base_rate = d["bua_perm_rate_01_21"].values
+    base_rate = d[rate_col].values
     pop01 = d["bua_01_pop"].values
     pop21 = d["bua_21_pop"].values
     d.loc[mask, "bua_21_pop_counterfact"] = (
@@ -195,8 +203,8 @@ def compute_welfare_metrics(marg_result, cf_prep):
     }
 
 
-def run_single_counterfactual(cf_prep, perm_rate_cf):
-    cf_data = compute_cf_populations(cf_prep, perm_rate_cf)
+def run_single_counterfactual(cf_prep, perm_rate_cf, rate_col=DEFAULT_RATE_COL):
+    cf_data = compute_cf_populations(cf_prep, perm_rate_cf, rate_col)
     marg = find_marginal_city(cf_data, cf_prep)
     welfare = compute_welfare_metrics(marg, cf_prep)
 
@@ -207,11 +215,14 @@ def run_single_counterfactual(cf_prep, perm_rate_cf):
     return {"data": d, "welfare": welfare}
 
 
-def run_sweep(city_set_name, cities_in_cf, rate_sequence, pop_totals, params, city_data):
+def run_sweep(city_set_name, cities_in_cf, rate_sequence, pop_totals, params, city_data,
+              rate_col=DEFAULT_RATE_COL):
     cf_prep = prepare_counterfactual_data(city_data, cities_in_cf, params, pop_totals)
 
     in_cf = cf_prep["data"]["in_counterfact"].values == 1
-    base_rate = cf_prep["data"]["bua_perm_rate_01_21"].values.copy()
+    base_rate = cf_prep["data"][rate_col].values.copy()
+    if np.any(base_rate[in_cf] <= 0):
+        raise ValueError(f"Treated cities must have a positive observed {rate_col}")
 
     agg_rows = []
     city_income_rows = []
@@ -222,7 +233,7 @@ def run_sweep(city_set_name, cities_in_cf, rate_sequence, pop_totals, params, ci
         perm_rate_cf = base_rate.copy()
         perm_rate_cf[in_cf] = np.maximum(base_rate[in_cf], target_rate)
 
-        result = run_single_counterfactual(cf_prep, perm_rate_cf)
+        result = run_single_counterfactual(cf_prep, perm_rate_cf, rate_col)
         rd = result["data"]
         w = result["welfare"]
 

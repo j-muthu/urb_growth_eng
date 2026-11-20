@@ -72,12 +72,64 @@ rate_sequence = np.arange(rate_start, rate_end + 0.0005, 0.001)
 rate_sequence = np.round(rate_sequence, 3)
 
 # ---------------------------------------------------------------------------
+# Robustness check: census household growth as the housing-supply measure
+# (households 2021 - households 2001, per 2001 household). Same counterfactual,
+# with this column in place of the permitting rate. Targets are the 75th and
+# 95th percentiles; the maximum (Ingleby Barwick, ~0.63) is a new-build outlier.
+# ---------------------------------------------------------------------------
+HH_COL = "bua_hh_growth_01_21"
+
+
+def _percentile_ref(col, q):
+    vals = city_data[col]
+    rate = float(np.percentile(vals, q))
+    city = city_data.loc[vals >= rate].sort_values(col).iloc[0]["BUA22NM"]
+    return {"label": f"{q}th percentile ({city})", "rate": rate}
+
+
+hh_reference_rates = pd.DataFrame([_percentile_ref(HH_COL, 75), _percentile_ref(HH_COL, 95)])
+hh_rate_start = math.floor(float(np.median(city_data[HH_COL])) * 100) / 100
+hh_rate_end = math.ceil((float(hh_reference_rates["rate"].max()) + 0.03) * 100) / 100
+hh_rate_sequence = np.round(np.arange(hh_rate_start, hh_rate_end + 0.00125, 0.0025), 4)
+
+MEASURES = {
+    "permits": {
+        "col": "bua_perm_rate_01_21",
+        "rate_sequence": rate_sequence,
+        "reference_rates": reference_rates,
+        "x_label": "Counterfactual permitting rate (permits per 2001 resident, 2001\u20132021)",
+        "dtick": 0.02,
+    },
+    "households": {
+        "col": HH_COL,
+        "rate_sequence": hh_rate_sequence,
+        "reference_rates": hh_reference_rates,
+        "x_label": "Counterfactual household growth (new households per 2001 household, 2001\u20132021)",
+        "dtick": 0.05,
+    },
+}
+
+# ---------------------------------------------------------------------------
 # Pre-compute results for central parameters (runs once per cold start).
 # Mirrors R's global.R: server.R short-circuits to these when params match.
 # ---------------------------------------------------------------------------
 from .model import run_sweep  # noqa: E402  (deferred to avoid hot-path cost on import order)
 
-DEFAULT_RESULTS = {
-    cs_name: run_sweep(cs_name, cs_cities, rate_sequence, pop_totals, PARAMS_CENTRAL, city_data)
-    for cs_name, cs_cities in cities_sets.items()
-}
+def _central_results(measure):
+    m = MEASURES[measure]
+    return {
+        cs_name: run_sweep(cs_name, cs_cities, m["rate_sequence"], pop_totals, PARAMS_CENTRAL,
+                           city_data, rate_col=m["col"])
+        for cs_name, cs_cities in cities_sets.items()
+    }
+
+
+DEFAULT_RESULTS = _central_results("permits")
+_DEFAULT_CACHE = {"permits": DEFAULT_RESULTS}
+
+
+def default_results(measure):
+    """Central-parameter results for a measure; the household ones are computed on first use."""
+    if measure not in _DEFAULT_CACHE:
+        _DEFAULT_CACHE[measure] = _central_results(measure)
+    return _DEFAULT_CACHE[measure]
