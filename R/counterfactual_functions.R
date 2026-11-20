@@ -14,12 +14,6 @@ GEOGRAPHIC_CONSTRAINT_VAR <- "mean_z_i"
 
 POP_ENGLAND <- list(y2001 = 49449700, y2021 = 56554900)
 
-POP_GROWTH_FACTORS <- list(
-  ew_2001_to_2011 = 1.07396242237523,
-  ew_2011_to_2021 = 1.06492008640114,
-  ew_2001_to_2021 = 1.14368415562741
-)
-
 RGDP_PER_CAPITA <- list(y2001 = 30316, y2021 = 36465)
 
 AUSTIN_DATA_FILE <- file.path("Data", "Issued_Construction_Permits_20250927.csv")
@@ -46,13 +40,6 @@ LONDON_BUAS <- tibble(
   )
 )
 
-BORDERING_LADS <- list(
-  E06000061 = c("E06000017", "E07000141", "E06000031", "E07000011",
-                "E06000055", "E06000042", "E06000062", "E07000131"),
-  E06000062 = c("E07000131", "E06000061", "E06000042", "E06000060",
-                "E07000177", "E07000221", "E07000220")
-)
-
 custom_palette <- c(
   '#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231',
   '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4',
@@ -72,38 +59,41 @@ city_set_labels <- c(
 # AUSTIN PERMITTING RATE CALCULATION ####
 #_______________________________________________________________________________
 
+# The extract contains new residential building permits only. Dwellings are counted from the
+# permit's Housing Units field. Classes with a fixed number of dwellings per building are set to
+# that number (this also removes a few keying errors, e.g. a two-family building recorded as 1,201
+# units). Where Housing Units is blank (mostly single-family permits before 2007), other classes
+# use the class median.
+# Calendar years 2001-2020 are the 20 years closest to the English census window (April 2001 to
+# March 2021).
+AUSTIN_FIRST_YEAR <- 2001
+AUSTIN_LAST_YEAR <- 2020
+AUSTIN_FIXED_UNITS <- c(
+  "R- 101 Single Family Houses" = 1, "C- 101 Single Family Houses" = 1,
+  "R- 102 Secondary Apartment" = 1,
+  "R- 103 Two Family Bldgs" = 2, "C- 103 Two Family Bldgs" = 2
+)
+
 calculate_austin_perm_rate <- function(filepath = AUSTIN_DATA_FILE) {
-  meaningful_residence_names <- c(
-    "residence", "condo", "duplex", "apartment", "family", "home",
-    "residential", "dwelling", "finish-out", "finish out", "story", "stories"
-  )
-  meaningful_pattern <- paste(c(meaningful_residence_names, paste0(meaningful_residence_names, "s")), collapse = "|")
-
-  other_residence_names <- c("res", "apt", "hm", "sty", "stry")
-  other_pattern <- paste(paste0("\\b", c(other_residence_names, paste0(other_residence_names, "s")), "\\b"), collapse = "|")
-
-  delete_conditions <- c("clubhouse", "new garage", "new parking garage", "maintenance", "kiosk", "new 2 level parking garage")
-
-  total_permits <- readr::read_csv(filepath, show_col_types = FALSE) %>%
-    select(`Calendar Year Issued`, `Housing Units`, `Status Current`, Description, `Number Of Floors`) %>%
+  total_units <- readr::read_csv(filepath, show_col_types = FALSE) %>%
+    select(`Calendar Year Issued`, `Housing Units`, `Status Current`, `Work Class`, `Permit Class`) %>%
     filter(
-      `Calendar Year Issued` >= 2001,
-      `Calendar Year Issued` <= 2021,
-      `Status Current` == "Final"
+      `Calendar Year Issued` >= AUSTIN_FIRST_YEAR,
+      `Calendar Year Issued` <= AUSTIN_LAST_YEAR,
+      `Status Current` == "Final",
+      `Work Class` == "New"
     ) %>%
-    mutate(
-      `Housing Units` = if_else(`Housing Units` > 1000, `Housing Units` - 1000, `Housing Units`),
-      Description = tolower(Description)
-    ) %>%
-    filter(str_detect(Description, meaningful_pattern) | str_detect(Description, other_pattern)) %>%
-    filter(!str_detect(Description, paste(delete_conditions, collapse = "|"))) %>%
-    mutate(
-      `Housing Units` = if_else(str_detect(Description, "multi"), pmax(5, `Number Of Floors`), 1)
-    ) %>%
-    summarise(total = sum(`Housing Units`, na.rm = TRUE)) %>%
+    group_by(`Permit Class`) %>%
+    mutate(units = case_when(
+      `Permit Class` %in% names(AUSTIN_FIXED_UNITS) ~ unname(AUSTIN_FIXED_UNITS[`Permit Class`]),
+      !is.na(`Housing Units`) ~ `Housing Units`,
+      TRUE ~ median(`Housing Units`, na.rm = TRUE)
+    )) %>%
+    ungroup() %>%
+    summarise(total = sum(units)) %>%
     pull(total)
 
-  total_permits / AUSTIN_2001_POP
+  total_units / AUSTIN_2001_POP
 }
 
 #_______________________________________________________________________________

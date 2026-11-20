@@ -44,7 +44,7 @@ The model requires &gamma; + &theta; > &sigma; + &beta; (urban costs must rise f
 - **Population-weighted consumption** credits every city resident with their city's consumption. It is what aggregate consumption would be if permitting costs were instead transfers that stay in the economy (for example land-value gains for owners of land granted permission, or developer contributions).
 - The gap between the two is exactly newcomers' total permitting payments divided by population, so the two measures are lower and upper bounds on the aggregate consumption gain.
 
-Reference permitting rates (75th/95th percentile UK cities, UK max, and Austin TX) are shown as dashed vertical lines on each chart.
+Reference permitting rates (the 75th and 95th percentile English cities and the English maximum) are shown as dashed vertical lines on each chart. The permitting rate sweep runs from just below the 75th percentile to just above the English maximum. Austin, Texas's rate (new dwellings permitted per 2001 resident, about 0.25) is computed in `calculate_austin_perm_rate()` for reference only: at more than twice the English maximum it lies outside the range over which observed growth can sensibly be scaled.
 
 ## Repository structure
 
@@ -142,7 +142,8 @@ shiny::runApp("app")
 
 ## Data sources
 
-- **City populations:** ONS Built-Up Area (BUA) estimates for 2001, 2011, and 2021
-- **Geographic constraints:** Local Authority District-level geographic constraint variables
-- **Austin permitting data:** City of Austin issued construction permits (for US reference rate)
+- **City populations and households:** Census 2001, 2011 and 2021 usual residents and 2001 and 2021 households by LSOA (Nomis), put on 2021 LSOA boundaries with the ONS LSOA 2001-2011 lookup and the LSOA 2011-2021 *exact-fit* lookup (each earlier LSOA's count is shared among the later LSOAs it maps to in proportion to their later populations, so national totals match the census exactly), then aggregated to December 2022 Built-Up Areas (BUAs)
+- **Planning permissions:** MHCLG district planning application statistics (PS2): granted major (counted as 10 dwellings) and minor dwelling applications, April 2001 to March 2021 (between the 2001 and 2021 censuses). Authorities abolished in the 2009-2021 reorganisations and development corporations (including the London Legacy and Old Oak and Park Royal development corporations) are mapped to their 2022 local authorities with `R/Data/lpa_to_lad22_crosswalk.csv`; national park authorities are excluded. Each authority's permissions are shared among its BUAs in proportion to their share of its 2001 population (`PERMIT_ALLOCATION`)
+- **Geographic constraints:** LSOA land use (share of forest, open land and water), averaged within each BUA
+- **Austin permitting data:** City of Austin issued construction permits, counted with the Housing Units field (US reference rate only)
 - **Parameter estimates:** See `R/parameter_estimates.csv` and the accompanying blog post

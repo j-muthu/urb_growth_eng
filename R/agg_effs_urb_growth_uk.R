@@ -38,8 +38,20 @@ PARAMS_CENTRAL <- list(
   lambda = 0.18    # land share in rural production
 )
 
-PERM_DATA_START_ROW <- 33128
-PERM_DATA_END_YEAR <- 2021
+# Permit window matched to the census dates (29 April 2001, 27 March 2011, 21 March 2021).
+# PS2 quarters are calendar quarters, so "census year" t runs from Q2 of t to Q1 of t+1:
+# 2001-2021 uses 2001 Q2 to 2021 Q1 (20 years); 2001-2011 uses 2001 Q2 to 2011 Q1 (10 years).
+PERM_FIRST_CENSUS_YEAR <- 2001
+PERM_LAST_CENSUS_YEAR_01_11 <- 2010
+PERM_LAST_CENSUS_YEAR_01_21 <- 2020
+
+# How each LAD's permits are shared out among BUAs:
+#   "lad_population" - in proportion to each BUA's share of the LAD's whole 2001 population
+#                      (so permits per head are uniform within a LAD, including outside BUAs).
+#   "bua_population" - in proportion to each BUA's share of the LAD's population living in BUAs
+#                      (all of a LAD's permits are assumed to fall inside BUAs; the pre-November
+#                      2026 behaviour).
+PERMIT_ALLOCATION <- "lad_population"
 
 PERCENTILE_FOR_PERM_RATE <- 0.98
 
@@ -68,183 +80,169 @@ if (SKIP_DATA_CONSTRUCTION) {
   lsoa_pop_2001_raw <- read_csv(file.path("Data", "lsoa_pop_2001.csv"))
   lsoa_pop_2011_raw <- read_csv(file.path("Data", "lsoa_pop_2011.csv"))
   lsoa_pop_2021_raw <- read_csv(file.path("Data", "lsoa_pop_2021.csv"))
+  # Census household counts (occupied dwellings) by LSOA, from Nomis: KS020 (2001), TS041 (2021)
+  lsoa_hh_2001_raw <- read_csv(file.path("Data", "lsoa_households_2001_KS020.csv")) %>%
+    distinct(GEOGRAPHY_CODE, .keep_all = TRUE)
+  lsoa_hh_2021_raw <- read_csv(file.path("Data", "lsoa_households_2021_TS041.csv")) %>%
+    distinct(GEOGRAPHY_CODE, .keep_all = TRUE)
   lsoa_lookup_2001_to_2011_raw <- read_csv(file.path("Data", "LSOA_(2001)_to_LSOA_(2011)_to_LAD_(2011)_Lookup_in_England_and_Wales.csv"))
-  lsoa_lookup_2011_to_2021_raw <- read_csv(file.path("Data", "LSOA_(2011)_to_LSOA_(2021)_to_LAD_(2022)_Best_Fit_Lookup_for_EW_(V2).csv"))
+  # Exact-fit lookup: one row per (2011 LSOA, 2021 LSOA) pair, so split 2011 LSOAs appear once
+  # for each of their 2021 children. (The best-fit lookup used previously has one row per 2011
+  # LSOA, which left the other children of a split with no 2011 parent; see the note below.)
+  lsoa_lookup_2011_to_2021_raw <- read_csv(file.path("Data", "LSOA_(2011)_to_LSOA_(2021)_to_LAD_(2022)_Exact_Fit_Lookup_for_EW_(V3).csv"))
   lsoa_bua_lookup_2021_raw <- read_csv(file.path("Data", "LSOA_(2021)_to_Built_Up_Area_to_Local_Authority_District_to_Region_(December_2022)_Lookup_in_England_and_Wales_v2.csv"))
-  
+
   # See https://assets.publishing.service.gov.uk/media/68516a97dc640d9b20f3e92a/District_Matters_-_Data_dictionary.pdf
   # For Planning Application Statistics Data Dictionary
-  perm_rates_raw <- read_csv(file.path("Data", "PS2_data_-_open_data_table__202409_.csv"), skip = 2) %>%
-    select(2:4, 34, 112) %>%
-    slice(PERM_DATA_START_ROW:n())
-  
-  # 2001-2011 LSOA merging
-  lsoa_pops_2001_2011 <- lsoa_pop_2001_raw %>%
-    full_join(lsoa_lookup_2001_to_2011_raw, by = c("lsoa_2001_code" = "LSOA01CD")) %>%
-    select(2:7) %>%
-    group_by(LSOA11CD) %>%
-    summarize(
-      pop_2001_lsoa_2011_nosplit = sum(usual_resident_pop_2001),
-      LSOA11NM = first(LSOA11NM),
-      CHGIND = first(CHGIND),
-      .groups = "drop"
-    ) %>%
-    left_join(lsoa_pop_2011_raw, by = c("LSOA11CD" = "lsoa_code_2011")) %>%
-    select(-lsoa_name_2011) %>%
-    mutate(
-      pop_2001_imputed = if_else(
-        CHGIND == "S",
-        usual_resident_pop_2011 / POP_GROWTH_FACTORS$ew_2001_to_2011,
-        pop_2001_lsoa_2011_nosplit
-      )
-    ) %>%
-    select(-pop_2001_lsoa_2011_nosplit)
-  
-  missing_2011_lsoas <- lsoa_pop_2011_raw %>%
-    anti_join(lsoa_pops_2001_2011, by = c("lsoa_code_2011" = "LSOA11CD")) %>%
-    transmute(
-      LSOA11CD = lsoa_code_2011,
-      LSOA11NM = lsoa_name_2011,
-      CHGIND = "N",
-      usual_resident_pop_2011 = usual_resident_pop_2011,
-      pop_2001_imputed = usual_resident_pop_2011 / POP_GROWTH_FACTORS$ew_2001_to_2011
-    )
-  
-  lsoa_pops_2001_2011 <- bind_rows(lsoa_pops_2001_2011, missing_2011_lsoas)
-  
-  # Diagnostic
-  split_diagnostic <- lsoa_pops_2001_2011 %>%
-    summarise(
-      n_split = sum(CHGIND == "S", na.rm = TRUE),
-      n_merged = sum(CHGIND == "M", na.rm = TRUE),
-      n_unchanged = sum(CHGIND == "U", na.rm = TRUE),
-      n_new = sum(CHGIND == "N", na.rm = TRUE),
-      n_total = n(),
-      pop_2011_split = sum(usual_resident_pop_2011[CHGIND == "S"], na.rm = TRUE),
-      pop_2011_total = sum(usual_resident_pop_2011, na.rm = TRUE)
-    )
-  
-  message(sprintf("LSOAs with imputed 2001 pop: %.1f%% of 2011 total",
-                  100 * split_diagnostic$pop_2011_split / split_diagnostic$pop_2011_total))
-  
-  # 2011-2021 LSOA merging
-  lsoa_pops_all_years <- lsoa_pops_2001_2011 %>%
-    full_join(
-      lsoa_lookup_2011_to_2021_raw %>% select(2:7),
-      by = "LSOA11CD"
-    ) %>%
-    group_by(LSOA21CD) %>%
-    summarize(
-      pop_2011_final = sum(usual_resident_pop_2011, na.rm = TRUE),
-      pop_2001_final = sum(pop_2001_imputed, na.rm = TRUE),
-      LSOA21NM = first(LSOA21NM),
-      LAD22CD = first(LAD22CD),
-      LAD22NM = first(LAD22NM),
-      .groups = "drop"
-    ) %>%
+  perm_rates_raw <- read_csv(file.path("Data", "PS2_data_-_open_data_table__202409_.csv"), skip = 2,
+                             locale = locale(encoding = "latin1")) %>%
+    select(LPANM, LPACD, Quarter,
+           `Total granted; major dwellings (all)`, `Total granted; minor dwellings (all)`)
+
+  # Planning authorities whose codes are not 2022 LADs: districts abolished in the 2009-2021
+  # reorganisations and development corporations (including LLDC and OPDC in London). Each is
+  # mapped to the LAD22 that now covers it. National park authorities are not mapped.
+  lpa_to_lad22 <- read_csv(file.path("Data", "lpa_to_lad22_crosswalk.csv"))
+
+  #-----------------------------------------------------------------------------
+  # Population and households on consistent 2021 LSOA boundaries
+  #-----------------------------------------------------------------------------
+  # Each earlier LSOA's population (and 2001 households) is shared among the later LSOAs it
+  # maps to, in proportion to their later populations. Unchanged (U) and merged (M) LSOAs map one-to-one or many-to-one,
+  # so this is a straight transfer. Split (S) and irregular (X) LSOAs divide their known
+  # population among their children. Totals are preserved exactly at every step.
+  apportion_pop <- function(lookup, from_code, to_code, from_pop, to_pop) {
+    lookup %>%
+      select(from = all_of(from_code), to = all_of(to_code)) %>%
+      distinct() %>%
+      inner_join(from_pop, by = "from") %>%
+      left_join(to_pop %>% select(to, to_weight = pop), by = "to") %>%
+      group_by(from) %>%
+      mutate(w = to_weight / sum(to_weight)) %>%
+      ungroup() %>%
+      group_by(to) %>%
+      summarise(across(-c(from, to_weight, w), ~ sum(.x * w)), .groups = "drop")
+  }
+
+  pop01 <- lsoa_pop_2001_raw %>%
+    transmute(from = lsoa_2001_code, pop_2001 = usual_resident_pop_2001) %>%
+    left_join(lsoa_hh_2001_raw %>% transmute(from = GEOGRAPHY_CODE, hh_2001 = OBS_VALUE), by = "from")
+  pop11 <- lsoa_pop_2011_raw %>% transmute(LSOA11CD = lsoa_code_2011, pop = usual_resident_pop_2011)
+  pop21 <- lsoa_pop_2021_raw %>% transmute(LSOA21CD = lsoa_21_code, pop = total_lsoa_pop_21)
+
+  # Four 2011 LSOAs (in split or irregular groups in Nottingham, Hartlepool, Leeds and Greenwich)
+  # have no row in the 2001-2011 lookup. Attach each to the 2001 LSOAs that feed the changed 2011
+  # LSOAs in the same MSOA, so the group's 2001 population is shared among all its 2011 LSOAs.
+  orphans_2011 <- lsoa_pop_2011_raw %>%
+    filter(!lsoa_code_2011 %in% lsoa_lookup_2001_to_2011_raw$LSOA11CD) %>%
+    transmute(LSOA11CD = lsoa_code_2011, msoa = str_sub(lsoa_name_2011, 1, -2))
+  orphan_rows <- lsoa_lookup_2001_to_2011_raw %>%
+    filter(CHGIND != "U") %>%
+    mutate(msoa = str_sub(LSOA11NM, 1, -2)) %>%
+    distinct(LSOA01CD, msoa) %>%
+    inner_join(orphans_2011, by = "msoa", relationship = "many-to-many") %>%
+    select(LSOA01CD, LSOA11CD)
+  lookup_2001_to_2011 <- bind_rows(
+    lsoa_lookup_2001_to_2011_raw %>% select(LSOA01CD, LSOA11CD),
+    orphan_rows
+  )
+
+  stopifnot(all(orphans_2011$LSOA11CD %in% orphan_rows$LSOA11CD),
+            all(pop01$from %in% lookup_2001_to_2011$LSOA01CD),
+            all(pop11$LSOA11CD %in% lookup_2001_to_2011$LSOA11CD),
+            all(pop11$LSOA11CD %in% lsoa_lookup_2011_to_2021_raw$LSOA11CD),
+            all(pop21$LSOA21CD %in% lsoa_lookup_2011_to_2021_raw$LSOA21CD))
+
+  # 2001 -> 2011 boundaries
+  lsoa_pops_2001_2011 <- apportion_pop(
+    lookup_2001_to_2011, "LSOA01CD", "LSOA11CD",
+    pop01, pop11 %>% rename(to = LSOA11CD)
+  ) %>%
+    rename(LSOA11CD = to) %>%
+    left_join(pop11 %>% rename(pop_2011 = pop), by = "LSOA11CD")
+
+  # 2011 -> 2021 boundaries (carries both the 2011 count and the 2001 count already on 2011 LSOAs)
+  lsoa_pops_all_years <- apportion_pop(
+    lsoa_lookup_2011_to_2021_raw, "LSOA11CD", "LSOA21CD",
+    lsoa_pops_2001_2011 %>% rename(from = LSOA11CD), pop21 %>% rename(to = LSOA21CD)
+  ) %>%
+    rename(LSOA21CD = to, pop_2001_final = pop_2001, pop_2011_final = pop_2011) %>%
+    left_join(lsoa_lookup_2011_to_2021_raw %>% distinct(LSOA21CD, LAD22CD, LAD22NM), by = "LSOA21CD") %>%
     full_join(lsoa_pop_2021_raw, by = c("LSOA21CD" = "lsoa_21_code")) %>%
-    select(-LSOA21NM) %>%
-    mutate(
-      pop_2011_final = if_else(
-        is.na(pop_2011_final) | pop_2011_final == 0,
-        total_lsoa_pop_21 / POP_GROWTH_FACTORS$ew_2011_to_2021,
-        pop_2011_final
-      ),
-      pop_2001_final = if_else(
-        is.na(pop_2001_final) | pop_2001_final == 0,
-        total_lsoa_pop_21 / POP_GROWTH_FACTORS$ew_2001_to_2021,
-        pop_2001_final
-      )
-    ) %>%
+    left_join(lsoa_hh_2021_raw %>% transmute(LSOA21CD = GEOGRAPHY_CODE, hh_2021 = OBS_VALUE), by = "LSOA21CD") %>%
     filter(startsWith(LSOA21CD, "E"))
-  
+
+  stopifnot(!anyNA(lsoa_pops_all_years$LAD22CD), !anyNA(lsoa_pops_all_years$pop_2001_final),
+            !anyNA(lsoa_pops_all_years$hh_2001), !anyNA(lsoa_pops_all_years$hh_2021),
+            n_distinct(lsoa_pops_all_years$LSOA21CD) == nrow(lsoa_pops_all_years))
+
+  message(sprintf(
+    "England population on 2021 LSOAs: 2001 %s (census %s), 2011 %s (census %s), 2021 %s",
+    format(round(sum(lsoa_pops_all_years$pop_2001_final)), big.mark = ","),
+    format(sum(lsoa_pop_2001_raw$usual_resident_pop_2001[startsWith(lsoa_pop_2001_raw$lsoa_2001_code, "E")]), big.mark = ","),
+    format(round(sum(lsoa_pops_all_years$pop_2011_final)), big.mark = ","),
+    format(sum(lsoa_pop_2011_raw$usual_resident_pop_2011[startsWith(lsoa_pop_2011_raw$lsoa_code_2011, "E")]), big.mark = ","),
+    format(sum(lsoa_pops_all_years$total_lsoa_pop_21), big.mark = ",")
+  ))
+  message(sprintf("England households on 2021 LSOAs: 2001 %s, 2021 %s",
+                  format(round(sum(lsoa_pops_all_years$hh_2001)), big.mark = ","),
+                  format(sum(lsoa_pops_all_years$hh_2021), big.mark = ",")))
+
   # Join land use data
-  lsoa_with_land_use <- lsoa_pops_all_years %>%
+  lsoa_with_lad <- lsoa_pops_all_years %>%
     left_join(lsoa_land_use_2022_raw, by = c("LSOA21CD" = "lsoa_2021_code")) %>%
     select(-lsoa_2021_name)
-  
-  # Fix missing LAD codes
-  lads_to_add <- read_csv(file.path("Data", "lads_to_add_backup.csv"))
-  
-  lsoa_with_lad <- lsoa_with_land_use %>%
-    left_join(lads_to_add, by = "LSOA21CD") %>%
-    mutate(LAD22CD = coalesce(LAD22CD.x, LAD22CD.y)) %>%
-    select(-LAD22CD.x, -LAD22CD.y)
-  
+
   valid_lad_codes <- lsoa_with_lad %>%
-    filter(!is.na(LAD22CD)) %>%
     distinct(LAD22CD) %>%
     pull(LAD22CD)
-  
-  # Process permitting data
-  perm_rates_by_year <- perm_rates_raw %>%
-    filter(LPACD %in% valid_lad_codes) %>%
-    mutate(
-      # Major dwellings developments have >= 10 houses, so I multiply by 10 as a lower bound
-      major_dwellings = as.numeric(na_if(`Total granted; major dwellings (all)`, "..")) * 10,
-      minor_dwellings = as.numeric(na_if(`Total granted; minor dwellings (all)`, "..")),
-      year = as.numeric(substr(Quarter, 1, 4))
-    ) %>%
-    group_by(LPACD, LPANM, year) %>%
-    summarise(
-      total_dwellings = sum(major_dwellings, na.rm = TRUE) + sum(minor_dwellings, na.rm = TRUE),
-      .groups = "drop"
-    ) %>%
-    filter(year <= PERM_DATA_END_YEAR)
-  
-  impute_permits_lm <- function(data) {
-    if (sum(!is.na(data$total_dwellings)) < 2) return(data)
-    model <- lm(total_dwellings ~ year, data = data[!is.na(data$total_dwellings), ])
-    data$total_dwellings_imputed <- pmax(predict(model, newdata = data), 0)
-    data$total_dwellings_final <- if_else(
-      is.na(data$total_dwellings),
-      data$total_dwellings_imputed,
-      data$total_dwellings
-    )
-    data
-  }
-  
-  lpacd_cant_impute <- perm_rates_by_year %>%
-    group_by(LPACD) %>%
-    summarise(n_nonmiss = sum(!is.na(total_dwellings)), .groups = "drop") %>%
-    filter(n_nonmiss <= 1) %>%
-    pull(LPACD)
-  
-  perm_rates_imputed <- perm_rates_by_year %>%
-    group_by(LPACD, LPANM) %>%
-    group_modify(~impute_permits_lm(.x)) %>%
-    ungroup()
-  
-  impute_from_bordering <- function(target_lpacd, bordering_lpacds, data) {
-    valid_bordering <- bordering_lpacds[bordering_lpacds %in% setdiff(unique(data$LPACD), lpacd_cant_impute)]
-    if (length(valid_bordering) == 0) return(NULL)
-    data %>%
-      filter(LPACD %in% valid_bordering) %>%
-      group_by(year) %>%
-      summarise(total_dwellings_final = median(total_dwellings_final, na.rm = TRUE), .groups = "drop") %>%
-      mutate(LPACD = target_lpacd)
-  }
-  
-  bordering_imputed <- map2_dfr(
-    names(BORDERING_LADS),
-    BORDERING_LADS,
-    ~impute_from_bordering(.x, .y, perm_rates_imputed)
+
+  #-----------------------------------------------------------------------------
+  # Planning permissions by LAD22, census-to-census windows
+  #-----------------------------------------------------------------------------
+  lpa_map <- bind_rows(
+    tibble(LPACD = valid_lad_codes, LAD22CD = valid_lad_codes, share = 1),
+    lpa_to_lad22 %>% select(LPACD, LAD22CD, share)
   )
-  
-  perm_rates_final <- perm_rates_imputed %>%
-    filter(!LPACD %in% lpacd_cant_impute) %>%
-    select(LPACD, LPANM, year, total_dwellings_final) %>%
-    bind_rows(bordering_imputed) %>%
-    group_by(LPACD, year) %>%
-    summarise(total_dwellings_final = sum(total_dwellings_final, na.rm = TRUE), .groups = "drop")
-  
-  perm_rates_summary <- perm_rates_final %>%
-    group_by(LPACD) %>%
+
+  perm_quarters <- perm_rates_raw %>%
+    mutate(
+      year = as.numeric(substr(Quarter, 1, 4)),
+      q = as.numeric(substr(Quarter, nchar(Quarter), nchar(Quarter))),
+      census_year = if_else(q >= 2, year, year - 1),
+      # Major dwellings developments have >= 10 houses, so I multiply by 10 as a lower bound
+      major_dwellings = suppressWarnings(as.numeric(`Total granted; major dwellings (all)`)) * 10,
+      minor_dwellings = suppressWarnings(as.numeric(`Total granted; minor dwellings (all)`)),
+      total_dwellings = major_dwellings + minor_dwellings
+    ) %>%
+    filter(census_year >= PERM_FIRST_CENSUS_YEAR, census_year <= PERM_LAST_CENSUS_YEAR_01_21)
+
+  unmapped <- perm_quarters %>% filter(!LPACD %in% lpa_map$LPACD)
+  message(sprintf("Permissions not mapped to a LAD (national parks): %s major and %s minor dwelling decisions",
+                  sum(unmapped$major_dwellings / 10, na.rm = TRUE), sum(unmapped$minor_dwellings, na.rm = TRUE)))
+
+  # A quarter suppressed in the source ("..") is filled with the authority's mean for the other
+  # quarters of the same census year.
+  perm_quarters <- perm_quarters %>%
+    filter(LPACD %in% lpa_map$LPACD) %>%
+    group_by(LPACD, census_year) %>%
+    mutate(total_dwellings = if_else(is.na(total_dwellings), mean(total_dwellings, na.rm = TRUE), total_dwellings)) %>%
+    ungroup()
+
+  perm_rates_summary <- perm_quarters %>%
+    inner_join(lpa_map, by = "LPACD", relationship = "many-to-many") %>%
+    group_by(LAD22CD) %>%
     summarise(
-      sum_perms_01_11 = sum(total_dwellings_final[year >= 2001 & year <= 2011], na.rm = TRUE),
-      sum_perms_01_21 = sum(total_dwellings_final, na.rm = TRUE),
+      n_quarters = n_distinct(Quarter),
+      sum_perms_01_11 = sum(total_dwellings[census_year <= PERM_LAST_CENSUS_YEAR_01_11] * share[census_year <= PERM_LAST_CENSUS_YEAR_01_11]),
+      sum_perms_01_21 = sum(total_dwellings * share),
       .groups = "drop"
-    )
+    ) %>%
+    rename(LPACD = LAD22CD)
+
+  n_expected_quarters <- 4 * (PERM_LAST_CENSUS_YEAR_01_21 - PERM_FIRST_CENSUS_YEAR + 1)
+  stopifnot(all(valid_lad_codes %in% perm_rates_summary$LPACD),
+            all(perm_rates_summary$n_quarters == n_expected_quarters))
   
   # LSOA to BUA mapping
   buas_to_add <- read_csv(file.path("Data", "buas_to_add_backup.csv"))
@@ -265,17 +263,26 @@ if (SKIP_DATA_CONSTRUCTION) {
       BUA22CD = if_else(LSOA21CD == "E01002946", "E63005164", BUA22CD)
     )
   
-  # Distribute LAD permits to BUAs by population share
+  # Distribute LAD permits to BUAs by 2001 population share (see PERMIT_ALLOCATION)
+  lad_pop_01 <- lsoa_with_lad %>%
+    group_by(LAD22CD) %>%
+    summarise(lad_all_pop = sum(pop_2001_final), .groups = "drop")
+
   lad_bua_pop_shares <- lsoa_full %>%
     filter(!is.na(BUA22CD)) %>%
     group_by(LAD22CD, BUA22CD) %>%
     summarise(bua_in_lad_pop = sum(pop_2001_final, na.rm = TRUE), .groups = "drop") %>%
+    left_join(lad_pop_01, by = "LAD22CD") %>%
     group_by(LAD22CD) %>%
     mutate(
-      lad_total_pop = sum(bua_in_lad_pop),
+      lad_total_pop = case_when(
+        PERMIT_ALLOCATION == "lad_population" ~ lad_all_pop,
+        PERMIT_ALLOCATION == "bua_population" ~ sum(bua_in_lad_pop)
+      ),
       pop_share = bua_in_lad_pop / lad_total_pop
     ) %>%
     ungroup()
+  stopifnot(!anyNA(lad_bua_pop_shares$pop_share))
   
   bua_permits <- lad_bua_pop_shares %>%
     left_join(perm_rates_summary, by = c("LAD22CD" = "LPACD")) %>%
@@ -319,6 +326,8 @@ if (SKIP_DATA_CONSTRUCTION) {
       bua_01_pop = sum(pop_2001_final),
       bua_11_pop = sum(pop_2011_final),
       bua_21_pop = sum(total_lsoa_pop_21),
+      bua_01_hh = sum(hh_2001),
+      bua_21_hh = sum(hh_2021),
       mean_z_i = 1 / (1 - mean(pct_forest_open_land_water) / 100),
       median_z_i = 1 / (1 - median(pct_forest_open_land_water) / 100),
       min_z_i = 1 / (1 - min(pct_forest_open_land_water) / 100),
@@ -326,7 +335,10 @@ if (SKIP_DATA_CONSTRUCTION) {
     ) %>%
     left_join(bua_permits_london %>% select(BUA22CD, bua_perm_rate_01_11, bua_perm_rate_01_21), by = "BUA22CD") %>%
     filter(bua_21_pop >= CITY_POP_THRESHOLD) %>%
-    mutate(across(c(bua_01_pop, bua_11_pop, bua_21_pop), round)) %>%
+    mutate(across(c(bua_01_pop, bua_11_pop, bua_21_pop, bua_01_hh, bua_21_hh), round),
+           # Net growth in occupied dwellings per initial household: an alternative to the
+           # permitting rate that counts homes directly (used as a robustness check)
+           bua_hh_growth_01_21 = (bua_21_hh - bua_01_hh) / bua_01_hh) %>%
     select(-all_of(setdiff(GEOGRAPHIC_CONSTRAINT_OPTIONS, GEOGRAPHIC_CONSTRAINT_VAR))) %>%
     rename(geographic_constraint = all_of(GEOGRAPHIC_CONSTRAINT_VAR)) %>%
     arrange(desc(bua_21_pop))
@@ -394,22 +406,25 @@ city_at_max <- city_data %>%
   slice_max(bua_21_pop, n = 1, with_ties = FALSE) %>%
   pull(BUA22NM)
 
+# Austin's rate (new dwellings permitted per 2001 resident) is reported for reference only. At more
+# than twice the English maximum it lies far outside the range of English rates over which
+# observed growth is scaled, so it is not used as a counterfactual target or plotted.
 reference_rates <- tibble(
   label = c(
     sprintf("75th percentile (%s)", city_at_75),
     sprintf("95th percentile (%s)", city_at_95),
-    sprintf("Max UK permitting rate (%s)", city_at_max),
-    "Austin, TX permitting rate"
+    sprintf("Max UK permitting rate (%s)", city_at_max)
   ),
-  rate = c(pct_75, pct_95, max_uk_rate, austin_rate)
+  rate = c(pct_75, pct_95, max_uk_rate)
 )
 
 message("\nReference rates:")
 print(reference_rates)
+message(sprintf("Austin, TX permitting rate (reference only, not plotted): %.4f", austin_rate))
 
-# Permitting rate sweep
+# Permitting rate sweep: from just below the 75th percentile to just above the English maximum
 rate_start <- floor((pct_75 - 0.01) * 100) / 100
-rate_end <- ceiling((austin_rate + 0.005) * 100) / 100
+rate_end <- ceiling((max_uk_rate + 0.01) * 100) / 100
 rate_increment <- 0.001
 rate_sequence <- seq(rate_start, rate_end, by = rate_increment)
 

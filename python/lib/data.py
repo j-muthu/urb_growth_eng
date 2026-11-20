@@ -64,12 +64,10 @@ reference_rates = _load_csv("reference_rates.csv")
 # ---------------------------------------------------------------------------
 all_perm_rates = city_data["bua_perm_rate_01_21"].values
 pct_75 = float(np.percentile(all_perm_rates, 75))
-austin_rate = reference_rates.loc[
-    reference_rates["label"].str.contains("Austin"), "rate"
-].iloc[0]
+max_uk_rate = float(reference_rates["rate"].max())
 
 rate_start = math.floor((pct_75 - 0.01) * 100) / 100
-rate_end = math.ceil((austin_rate + 0.005) * 100) / 100
+rate_end = math.ceil((max_uk_rate + 0.01) * 100) / 100
 rate_sequence = np.arange(rate_start, rate_end + 0.0005, 0.001)
 rate_sequence = np.round(rate_sequence, 3)
 

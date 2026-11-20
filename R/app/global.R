@@ -72,7 +72,6 @@ cities_sets <- list(
 # REFERENCE RATES ####
 #_______________________________________________________________________________
 
-austin_rate <- calculate_austin_perm_rate(file.path("..", AUSTIN_DATA_FILE))
 all_perm_rates <- city_data$bua_perm_rate_01_21
 
 pct_75 <- quantile(all_perm_rates, 0.75)
@@ -100,10 +99,9 @@ reference_rates <- tibble(
   label = c(
     sprintf("75th percentile (%s)", city_at_75),
     sprintf("95th percentile (%s)", city_at_95),
-    sprintf("Max UK permitting rate (%s)", city_at_max),
-    "Austin, TX permitting rate"
+    sprintf("Max UK permitting rate (%s)", city_at_max)
   ),
-  rate = c(pct_75, pct_95, max_uk_rate, austin_rate)
+  rate = c(pct_75, pct_95, max_uk_rate)
 )
 
 #_______________________________________________________________________________
@@ -111,7 +109,7 @@ reference_rates <- tibble(
 #_______________________________________________________________________________
 
 rate_start <- floor((pct_75 - 0.01) * 100) / 100
-rate_end <- ceiling((austin_rate + 0.005) * 100) / 100
+rate_end <- ceiling((max_uk_rate + 0.01) * 100) / 100
 rate_increment <- 0.001
 rate_sequence <- seq(rate_start, rate_end, by = rate_increment)
 
