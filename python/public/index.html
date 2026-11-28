@@ -15,9 +15,95 @@
 
 <div class="app-container">
 
+
+  <!-- Main Panel -->
+  <main class="main-panel">
+    <!-- Top-level tabs. Tabs with several charts open a menu of measures when clicked;
+         data-target on each menu item is the id of the .tab-content it shows. -->
+    <div class="tabs">
+      <div class="tab-wrap active" data-group="national-income">
+        <button class="tab">National Income</button>
+      </div>
+      <div class="tab-wrap has-menu" data-group="consumption">
+        <button class="tab" aria-haspopup="menu" aria-expanded="false">Consumption<span class="tab-chevron"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+        <div class="tab-menu" role="menu">
+          <button class="tab-menu-item" role="menuitemradio" data-target="incumbent-cons">Permitting as Welfare Loss</button>
+          <button class="tab-menu-item" role="menuitemradio" data-target="social-cons">Permitting as Transfers</button>
+          <button class="tab-menu-item" role="menuitemradio" data-target="newcomer-cons">Newcomer and Rural</button>
+        </div>
+      </div>
+      <div class="tab-wrap has-menu" data-group="city">
+        <button class="tab" aria-haspopup="menu" aria-expanded="false">City-Specific Metrics<span class="tab-chevron"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+        <div class="tab-menu" role="menu">
+          <button class="tab-menu-item" role="menuitemradio" data-target="city-pop">Population</button>
+          <button class="tab-menu-item" role="menuitemradio" data-target="city-income">Income</button>
+          <button class="tab-menu-item" role="menuitemradio" data-target="city-cons">Consumption</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-content active" id="national-income">
+      <div id="chart-national-income" class="chart-container"></div>
+      <div class="axis-caption">
+        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+      </div>
+    </div>
+    <div class="tab-content" id="incumbent-cons">
+      <div class="axis-caption caption-above">
+        <span class="help-link" tabindex="0">What's the difference between the two permitting types?<span class="tooltip-text tooltip-wide">Newcomers to a city pay a permitting cost equal to the gap between that city's consumption (income minus commuting and housing costs) and rural consumption. The two types differ in what happens to that payment. <b>Permitting as welfare loss</b> is Duranton and Puga's (2023) assumption: the cost is pure waste (delay, compliance and similar costs), so nobody receives it. Only a city's original residents receive its consumption; newcomers and rural residents receive rural consumption. <b>Permitting as transfers</b> treats the cost as money that stays in the economy, such as land-value gains for owners of land granted permission, or developer contributions, so every city resident is credited with their city's consumption. The gap between the two is exactly newcomers' total permitting payments, so they are lower and upper bounds on the aggregate consumption gain.</span></span>
+      </div>
+      <div id="chart-incumbent-cons" class="chart-container"></div>
+      <div class="axis-caption">
+        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+      </div>
+    </div>
+    <div class="tab-content" id="social-cons">
+      <div class="axis-caption caption-above">
+        <span class="help-link" tabindex="0">What's the difference between the two permitting types?<span class="tooltip-text tooltip-wide">Newcomers to a city pay a permitting cost equal to the gap between that city's consumption (income minus commuting and housing costs) and rural consumption. The two types differ in what happens to that payment. <b>Permitting as welfare loss</b> is Duranton and Puga's (2023) assumption: the cost is pure waste (delay, compliance and similar costs), so nobody receives it. Only a city's original residents receive its consumption; newcomers and rural residents receive rural consumption. <b>Permitting as transfers</b> treats the cost as money that stays in the economy, such as land-value gains for owners of land granted permission, or developer contributions, so every city resident is credited with their city's consumption. The gap between the two is exactly newcomers' total permitting payments, so they are lower and upper bounds on the aggregate consumption gain.</span></span>
+      </div>
+      <div id="chart-social-cons" class="chart-container"></div>
+      <div class="axis-caption">
+        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+      </div>
+    </div>
+    <div class="tab-content" id="newcomer-cons">
+      <div id="chart-newcomer-cons" class="chart-container"></div>
+      <div class="axis-caption">
+        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+      </div>
+    </div>
+    <div class="tab-content" id="city-pop">
+      <div id="city-pop-subtabs"></div>
+      <div id="chart-city-pop" class="chart-container"></div>
+      <div class="axis-caption">
+        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+      </div>
+    </div>
+    <div class="tab-content" id="city-income">
+      <div id="city-income-subtabs"></div>
+      <div id="chart-city-income" class="chart-container"></div>
+      <div class="axis-caption">
+        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+      </div>
+    </div>
+    <div class="tab-content" id="city-cons">
+      <div id="city-cons-subtabs"></div>
+      <div id="chart-city-cons" class="chart-container"></div>
+      <div class="axis-caption">
+        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
+      </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loading" class="loading-overlay" style="display:none;">
+      <div class="spinner"></div>
+      <p>Running counterfactual sweep...</p>
+    </div>
+  </main>
+
   <!-- Sidebar -->
   <aside class="sidebar">
-    <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar" title="Collapse sidebar">&laquo;</button>
+    <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Hide settings" aria-expanded="true" title="Hide settings"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     <label for="city-set">City set</label>
     <select id="city-set">
       <option value="all" selected>All city sets</option>
@@ -80,91 +166,6 @@
       </svg>
     </a>
   </aside>
-
-  <!-- Main Panel -->
-  <main class="main-panel">
-    <div class="tabs">
-      <button class="tab active" data-group="national-income">National Income</button>
-      <button class="tab" data-group="consumption">Consumption</button>
-      <button class="tab" data-group="city">City-Specific Metrics</button>
-    </div>
-
-    <!-- Sub-metric dropdowns: one per tab that has more than one chart -->
-    <div class="metric-picker" data-group="consumption">
-      <label for="consumption-metric">Measure</label>
-      <select id="consumption-metric" class="metric-select">
-        <option value="incumbent-cons" selected>Permitting as Welfare Loss</option>
-        <option value="social-cons">Permitting as Transfers</option>
-        <option value="newcomer-cons">Newcomer and Rural</option>
-      </select>
-    </div>
-    <div class="metric-picker" data-group="city">
-      <label for="city-metric">Metric</label>
-      <select id="city-metric" class="metric-select">
-        <option value="city-pop" selected>Population</option>
-        <option value="city-income">Income</option>
-        <option value="city-cons">Consumption</option>
-      </select>
-    </div>
-
-    <div class="tab-content active" id="national-income">
-      <div id="chart-national-income" class="chart-container"></div>
-      <div class="axis-caption">
-        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
-      </div>
-    </div>
-    <div class="tab-content" id="incumbent-cons">
-      <div class="axis-caption caption-above">
-        <span class="help-link" tabindex="0">What's the difference between the two consumption measures?<span class="tooltip-text tooltip-wide"><b>Consumption (permitting as welfare loss)</b> is Duranton and Puga's (2023) measure. A city's original residents receive that city's consumption (income minus commuting and housing costs). Newcomers and rural residents receive rural consumption, because the permitting cost newcomers pay absorbs the difference. Duranton and Puga treat that cost as a pure loss (delay, compliance and similar costs), so nobody receives it. <b>Consumption (permitting as transfers)</b> credits every city resident with their city's consumption. That is what aggregate consumption would be if permitting costs were instead transfers that stay in the economy, such as land-value gains for owners of land granted permission, or developer contributions. The gap between the two is exactly newcomers' total permitting payments, so they are lower and upper bounds on the aggregate gain.</span></span>
-      </div>
-      <div id="chart-incumbent-cons" class="chart-container"></div>
-      <div class="axis-caption">
-        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
-      </div>
-    </div>
-    <div class="tab-content" id="social-cons">
-      <div class="axis-caption caption-above">
-        <span class="help-link" tabindex="0">What's the difference between the two consumption measures?<span class="tooltip-text tooltip-wide"><b>Consumption (permitting as welfare loss)</b> is Duranton and Puga's (2023) measure. A city's original residents receive that city's consumption (income minus commuting and housing costs). Newcomers and rural residents receive rural consumption, because the permitting cost newcomers pay absorbs the difference. Duranton and Puga treat that cost as a pure loss (delay, compliance and similar costs), so nobody receives it. <b>Consumption (permitting as transfers)</b> credits every city resident with their city's consumption. That is what aggregate consumption would be if permitting costs were instead transfers that stay in the economy, such as land-value gains for owners of land granted permission, or developer contributions. The gap between the two is exactly newcomers' total permitting payments, so they are lower and upper bounds on the aggregate gain.</span></span>
-      </div>
-      <div id="chart-social-cons" class="chart-container"></div>
-      <div class="axis-caption">
-        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
-      </div>
-    </div>
-    <div class="tab-content" id="newcomer-cons">
-      <div id="chart-newcomer-cons" class="chart-container"></div>
-      <div class="axis-caption">
-        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
-      </div>
-    </div>
-    <div class="tab-content" id="city-pop">
-      <div id="city-pop-subtabs"></div>
-      <div id="chart-city-pop" class="chart-container"></div>
-      <div class="axis-caption">
-        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
-      </div>
-    </div>
-    <div class="tab-content" id="city-income">
-      <div id="city-income-subtabs"></div>
-      <div id="chart-city-income" class="chart-container"></div>
-      <div class="axis-caption">
-        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
-      </div>
-    </div>
-    <div class="tab-content" id="city-cons">
-      <div id="city-cons-subtabs"></div>
-      <div id="chart-city-cons" class="chart-container"></div>
-      <div class="axis-caption">
-        <span class="help-link rate-help" tabindex="0">What is the counterfactual permitting rate?<span class="tooltip-text">A measure of how relaxed permitting is in the city under the counterfactual. Higher means more relaxed, so the city facilitates more housing construction.</span></span>
-      </div>
-    </div>
-
-    <!-- Loading overlay -->
-    <div id="loading" class="loading-overlay" style="display:none;">
-      <div class="spinner"></div>
-      <p>Running counterfactual sweep...</p>
-    </div>
-  </main>
 
 </div>
 

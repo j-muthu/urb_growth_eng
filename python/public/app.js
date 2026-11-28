@@ -67,21 +67,33 @@ document.getElementById('reset-btn').addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tabs: three top-level tabs; Consumption and City-Specific Metrics each
-// have a dropdown choosing which chart (.tab-content) is shown
+// Tabs: three top-level tabs. National Income shows its chart when clicked;
+// Consumption and City-Specific Metrics open a menu to pick the measure.
 // ---------------------------------------------------------------------------
-const TAB_GROUP_SELECT = {
-  'national-income': null,          // single chart, no dropdown
-  'consumption': 'consumption-metric',
-  'city': 'city-metric',
+const groupChart = {               // tab group -> id of the .tab-content it shows
+  'national-income': 'national-income',
+  'consumption': 'incumbent-cons',
+  'city': 'city-pop',
 };
 let activeGroup = 'national-income';
 
-function showActiveChart() {
-  const selectId = TAB_GROUP_SELECT[activeGroup];
-  const contentId = selectId ? document.getElementById(selectId).value : activeGroup;
-  document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === contentId));
-  document.querySelectorAll('.metric-picker').forEach(p => p.classList.toggle('active', p.dataset.group === activeGroup));
+function closeTabMenus(except) {
+  document.querySelectorAll('.tab-wrap.open').forEach(w => {
+    if (w === except) return;
+    w.classList.remove('open');
+    w.querySelector('.tab').setAttribute('aria-expanded', 'false');
+  });
+}
+
+function showGroup(group) {
+  activeGroup = group;
+  document.querySelectorAll('.tab-wrap').forEach(w => w.classList.toggle('active', w.dataset.group === group));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === groupChart[group]));
+  document.querySelectorAll('.tab-menu-item').forEach(item => {
+    const on = item.dataset.target === groupChart[item.closest('.tab-wrap').dataset.group];
+    item.classList.toggle('active', on);
+    item.setAttribute('aria-checked', String(on));
+  });
 
   // Re-render visible chart so Plotly sizes correctly
   if (currentData) renderAll(currentData);
@@ -89,15 +101,28 @@ function showActiveChart() {
 
 document.querySelectorAll('.tab').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b === btn));
-    activeGroup = btn.dataset.group;
-    showActiveChart();
+    const wrap = btn.closest('.tab-wrap');
+    closeTabMenus(wrap);
+    if (wrap.classList.contains('has-menu')) {
+      btn.setAttribute('aria-expanded', String(wrap.classList.toggle('open')));
+    } else {
+      showGroup(wrap.dataset.group);
+    }
   });
 });
 
-document.querySelectorAll('.metric-select').forEach(sel => {
-  sel.addEventListener('change', showActiveChart);
+document.querySelectorAll('.tab-menu-item').forEach(item => {
+  item.addEventListener('click', () => {
+    const group = item.closest('.tab-wrap').dataset.group;
+    groupChart[group] = item.dataset.target;
+    closeTabMenus();
+    showGroup(group);
+  });
 });
+
+document.addEventListener('click', e => { if (!e.target.closest('.tab-wrap')) closeTabMenus(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeTabMenus(); });
+showGroup(activeGroup);  // sync menu ticks with the default charts
 
 // ---------------------------------------------------------------------------
 // Sidebar collapse toggle
@@ -106,11 +131,13 @@ document.getElementById('sidebar-toggle').addEventListener('click', () => {
   const container = document.querySelector('.app-container');
   const btn = document.getElementById('sidebar-toggle');
   const collapsed = container.classList.toggle('sidebar-collapsed');
-  btn.innerHTML = collapsed ? '&raquo;' : '&laquo;';
-  btn.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+  const label = collapsed ? 'Show settings' : 'Hide settings';
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+  btn.setAttribute('aria-expanded', String(!collapsed));
 
-  // Re-render so Plotly fits the new width
-  if (currentData) renderAll(currentData);
+  // Re-render once the sidebar's 0.2s width transition has finished, so Plotly fits the new width
+  setTimeout(() => { if (currentData) renderAll(currentData); }, 250);
 });
 
 // ---------------------------------------------------------------------------

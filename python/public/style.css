@@ -27,7 +27,7 @@ header h1 {
   width: 280px;
   min-width: 280px;
   background: #fff;
-  border-right: 1px solid #dee2e6;
+  border-left: 1px solid #dee2e6;
   padding: 20px;
   overflow-y: auto;
   display: flex;
@@ -38,8 +38,11 @@ header h1 {
 
 .sidebar-toggle {
   align-self: flex-end;
-  width: 26px;
-  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
   margin-bottom: 8px;
   padding: 0;
   border: 1px solid #ced4da;
@@ -181,6 +184,7 @@ header h1 {
 /* Main panel */
 .main-panel {
   flex: 1;
+  min-width: 0;  /* let the panel shrink when the sidebar opens, rather than pushing it off-screen */
   padding: 20px;
   position: relative;
 }
@@ -194,55 +198,88 @@ header h1 {
   margin-bottom: 16px;
 }
 
-.tab {
-  padding: 8px 14px;
+.tab-wrap {
+  position: relative;
+  display: flex;
+  align-items: stretch;
   border: 1px solid transparent;
   border-bottom: none;
-  background: none;
-  cursor: pointer;
-  font-size: 0.85rem;
-  color: #6c757d;
   border-radius: 4px 4px 0 0;
 }
 
-.tab:hover { color: #333; }
-
-.tab.active {
-  color: #333;
+.tab-wrap.active {
   border-color: #dee2e6;
   background: #fff;
-  font-weight: 500;
-  position: relative;
   top: 2px;
   border-bottom: 2px solid #fff;
 }
 
-/* Sub-metric dropdown shown under a tab that has several charts */
-.metric-picker {
-  display: none;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 14px;
+.tab {
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  cursor: pointer;
   font-size: 0.85rem;
-  color: #495057;
+  color: #6c757d;
 }
 
-.metric-picker.active {
-  display: flex;
+.tab-wrap.has-menu .tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.metric-picker label {
+.tab-chevron { display: inline-flex; }
+.tab-chevron svg { transition: transform 0.15s ease; }
+.tab-wrap.open .tab-chevron svg { transform: rotate(180deg); }
+
+.tab:hover,
+.tab-wrap.open .tab { color: #333; }
+
+.tab-wrap.active .tab {
+  color: #333;
   font-weight: 500;
 }
 
-.metric-picker select {
-  padding: 6px 8px;
-  border: 1px solid #ced4da;
-  border-radius: 4px;
+/* Measure menu under a tab's chevron */
+.tab-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 2px);
+  left: -1px;
+  min-width: 100%;
+  padding: 4px 0;
   background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  z-index: 1500;
+}
+
+.tab-wrap.open .tab-menu { display: block; }
+
+.tab-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 14px;
+  border: none;
+  background: none;
+  text-align: left;
+  white-space: nowrap;
   font-size: 0.85rem;
   color: #333;
   cursor: pointer;
+}
+
+.tab-menu-item:hover,
+.tab-menu-item:focus-visible {
+  background: #f1f3f5;
+  outline: none;
+}
+
+.tab-menu-item.active {
+  color: #0d6efd;
+  font-weight: 500;
 }
 
 .tab-content {
@@ -383,9 +420,10 @@ header h1 {
 @media (max-width: 768px) {
   .app-container { flex-direction: column; }
   .sidebar {
+    order: -1;  /* settings above the charts on narrow screens */
     width: 100%;
     min-width: unset;
-    border-right: none;
+    border-left: none;
     border-bottom: 1px solid #dee2e6;
   }
   .tabs { font-size: 0.75rem; }
