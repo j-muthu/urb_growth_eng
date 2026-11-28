@@ -391,10 +391,10 @@ function renderAll(data) {
     '% change in income per capita', 'Change in national income per capita');
 
   renderAggChart('chart-social-cons', data, 'pct_chg_cons_social',
-    '% change in consumption', 'Change in population-weighted consumption per capita (upper bound)');
+    '% change in consumption', 'Change in consumption per capita (permitting as transfers)');
 
   renderAggChart('chart-incumbent-cons', data, 'pct_chg_cons_incumb',
-    '% change in consumption', 'Change in incumbent-weighted consumption per capita (Duranton\u2013Puga measure)');
+    '% change in consumption', 'Change in consumption per capita (permitting as welfare loss)');
 
   renderAggChart('chart-newcomer-cons', data, 'pct_chg_newcomer_cons',
     '% change in consumption', 'Change in newcomer and rural consumption');

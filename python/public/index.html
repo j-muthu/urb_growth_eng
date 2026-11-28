@@ -85,8 +85,8 @@
   <main class="main-panel">
     <div class="tabs">
       <button class="tab active" data-tab="national-income">National Income</button>
-      <button class="tab" data-tab="incumbent-cons">Consumption (Incumbent-Weighted, DP)</button>
-      <button class="tab" data-tab="social-cons">Consumption (Population-Weighted)</button>
+      <button class="tab" data-tab="incumbent-cons">Consumption (Permitting as Welfare Loss)</button>
+      <button class="tab" data-tab="social-cons">Consumption (Permitting as Transfers)</button>
       <button class="tab" data-tab="newcomer-cons">Newcomer and Rural Consumption</button>
       <button class="tab" data-tab="city-pop">City Population</button>
       <button class="tab" data-tab="city-income">City Income</button>
@@ -101,7 +101,7 @@
     </div>
     <div class="tab-content" id="incumbent-cons">
       <div class="axis-caption caption-above">
-        <span class="help-link" tabindex="0">What's the difference between population-weighted and incumbent-weighted consumption?<span class="tooltip-text tooltip-wide"><b>Incumbent-weighted consumption</b> is Duranton and Puga's (2023) measure. A city's original residents receive that city's consumption (income minus commuting and housing costs). Newcomers and rural residents receive rural consumption, because the permitting cost newcomers pay absorbs the difference. Duranton and Puga treat that cost as a pure loss (delay, compliance and similar costs), so nobody receives it. <b>Population-weighted consumption</b> credits every city resident with their city's consumption. That is what aggregate consumption would be if permitting costs were instead transfers that stay in the economy, such as land-value gains for owners of land granted permission, or developer contributions. The gap between the two is exactly newcomers' total permitting payments, so they are lower and upper bounds on the aggregate gain.</span></span>
+        <span class="help-link" tabindex="0">What's the difference between the two consumption measures?<span class="tooltip-text tooltip-wide"><b>Consumption (permitting as welfare loss)</b> is Duranton and Puga's (2023) measure. A city's original residents receive that city's consumption (income minus commuting and housing costs). Newcomers and rural residents receive rural consumption, because the permitting cost newcomers pay absorbs the difference. Duranton and Puga treat that cost as a pure loss (delay, compliance and similar costs), so nobody receives it. <b>Consumption (permitting as transfers)</b> credits every city resident with their city's consumption. That is what aggregate consumption would be if permitting costs were instead transfers that stay in the economy, such as land-value gains for owners of land granted permission, or developer contributions. The gap between the two is exactly newcomers' total permitting payments, so they are lower and upper bounds on the aggregate gain.</span></span>
       </div>
       <div id="chart-incumbent-cons" class="chart-container"></div>
       <div class="axis-caption">
@@ -110,7 +110,7 @@
     </div>
     <div class="tab-content" id="social-cons">
       <div class="axis-caption caption-above">
-        <span class="help-link" tabindex="0">What's the difference between population-weighted and incumbent-weighted consumption?<span class="tooltip-text tooltip-wide"><b>Incumbent-weighted consumption</b> is Duranton and Puga's (2023) measure. A city's original residents receive that city's consumption (income minus commuting and housing costs). Newcomers and rural residents receive rural consumption, because the permitting cost newcomers pay absorbs the difference. Duranton and Puga treat that cost as a pure loss (delay, compliance and similar costs), so nobody receives it. <b>Population-weighted consumption</b> credits every city resident with their city's consumption. That is what aggregate consumption would be if permitting costs were instead transfers that stay in the economy, such as land-value gains for owners of land granted permission, or developer contributions. The gap between the two is exactly newcomers' total permitting payments, so they are lower and upper bounds on the aggregate gain.</span></span>
+        <span class="help-link" tabindex="0">What's the difference between the two consumption measures?<span class="tooltip-text tooltip-wide"><b>Consumption (permitting as welfare loss)</b> is Duranton and Puga's (2023) measure. A city's original residents receive that city's consumption (income minus commuting and housing costs). Newcomers and rural residents receive rural consumption, because the permitting cost newcomers pay absorbs the difference. Duranton and Puga treat that cost as a pure loss (delay, compliance and similar costs), so nobody receives it. <b>Consumption (permitting as transfers)</b> credits every city resident with their city's consumption. That is what aggregate consumption would be if permitting costs were instead transfers that stay in the economy, such as land-value gains for owners of land granted permission, or developer contributions. The gap between the two is exactly newcomers' total permitting payments, so they are lower and upper bounds on the aggregate gain.</span></span>
       </div>
       <div id="chart-social-cons" class="chart-container"></div>
       <div class="axis-caption">
