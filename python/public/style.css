@@ -217,6 +217,34 @@ header h1 {
   border-bottom: 2px solid #fff;
 }
 
+/* Sub-metric dropdown shown under a tab that has several charts */
+.metric-picker {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 0.85rem;
+  color: #495057;
+}
+
+.metric-picker.active {
+  display: flex;
+}
+
+.metric-picker label {
+  font-weight: 500;
+}
+
+.metric-picker select {
+  padding: 6px 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 0.85rem;
+  color: #333;
+  cursor: pointer;
+}
+
 .tab-content {
   display: none;
 }

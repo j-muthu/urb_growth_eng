@@ -67,18 +67,36 @@ document.getElementById('reset-btn').addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tabs
+// Tabs: three top-level tabs; Consumption and City-Specific Metrics each
+// have a dropdown choosing which chart (.tab-content) is shown
 // ---------------------------------------------------------------------------
+const TAB_GROUP_SELECT = {
+  'national-income': null,          // single chart, no dropdown
+  'consumption': 'consumption-metric',
+  'city': 'city-metric',
+};
+let activeGroup = 'national-income';
+
+function showActiveChart() {
+  const selectId = TAB_GROUP_SELECT[activeGroup];
+  const contentId = selectId ? document.getElementById(selectId).value : activeGroup;
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === contentId));
+  document.querySelectorAll('.metric-picker').forEach(p => p.classList.toggle('active', p.dataset.group === activeGroup));
+
+  // Re-render visible chart so Plotly sizes correctly
+  if (currentData) renderAll(currentData);
+}
+
 document.querySelectorAll('.tab').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById(btn.dataset.tab).classList.add('active');
-
-    // Re-render visible chart so Plotly sizes correctly
-    if (currentData) renderAll(currentData);
+    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b === btn));
+    activeGroup = btn.dataset.group;
+    showActiveChart();
   });
+});
+
+document.querySelectorAll('.metric-select').forEach(sel => {
+  sel.addEventListener('change', showActiveChart);
 });
 
 // ---------------------------------------------------------------------------

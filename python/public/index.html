@@ -84,13 +84,27 @@
   <!-- Main Panel -->
   <main class="main-panel">
     <div class="tabs">
-      <button class="tab active" data-tab="national-income">National Income</button>
-      <button class="tab" data-tab="incumbent-cons">Consumption (Permitting as Welfare Loss)</button>
-      <button class="tab" data-tab="social-cons">Consumption (Permitting as Transfers)</button>
-      <button class="tab" data-tab="newcomer-cons">Newcomer and Rural Consumption</button>
-      <button class="tab" data-tab="city-pop">City Population</button>
-      <button class="tab" data-tab="city-income">City Income</button>
-      <button class="tab" data-tab="city-cons">City Consumption</button>
+      <button class="tab active" data-group="national-income">National Income</button>
+      <button class="tab" data-group="consumption">Consumption</button>
+      <button class="tab" data-group="city">City-Specific Metrics</button>
+    </div>
+
+    <!-- Sub-metric dropdowns: one per tab that has more than one chart -->
+    <div class="metric-picker" data-group="consumption">
+      <label for="consumption-metric">Measure</label>
+      <select id="consumption-metric" class="metric-select">
+        <option value="incumbent-cons" selected>Permitting as Welfare Loss</option>
+        <option value="social-cons">Permitting as Transfers</option>
+        <option value="newcomer-cons">Newcomer and Rural</option>
+      </select>
+    </div>
+    <div class="metric-picker" data-group="city">
+      <label for="city-metric">Metric</label>
+      <select id="city-metric" class="metric-select">
+        <option value="city-pop" selected>Population</option>
+        <option value="city-income">Income</option>
+        <option value="city-cons">Consumption</option>
+      </select>
     </div>
 
     <div class="tab-content active" id="national-income">
